@@ -384,7 +384,8 @@ const AWARDS_JSON_PATH = './Premios.json';
 loadClientsFromWorkbookUrl(CLIENTS_XLSX_PATH).catch(function(e){showError(e.message || e);});
 loadSalesFromWorkbookUrl(SALES_XLSX_PATH).catch(e => { showError(e.message||e); });
 loadInvoicedFromWorkbookUrl(INVOICED_XLSX_PATH).catch(e => { showError(e.message||e); });
-loadAwardsFromJSON(AWARDS_JSON_PATH).then(()=>{ tryLoadAwardsLocalOverlay(); });
+loadAwardsFromJSON(API_AWARDS_URL).then(()=>{ tryLoadAwardsLocalOverlay(); });
+
 // ===== Catálogo de premios
 function normHeader(h){
   var s=String(h==null?'':h);
@@ -442,7 +443,7 @@ async function loadAwardsFromJSON(url){
 
 // MODO 1 (recomendado): remoto tipo Vercel API (igual al de ingenieros)
 const API_AWARDS_URL = "https://portal-api-nine.vercel.app/api/premios"; // <-- Ajusta a tu endpoint real
-const ADMIN_KEY_AW   = "admin"; // <-- tu clave (igual patrón CotizacionIngenieria)
+const ADMIN_KEY_AW   = "ingetes"; // <-- tu clave (igual patrón CotizacionIngenieria)
 
 // Guarda remoto (si API_AWARDS_URL responde). Devuelve true si guardó.
 async function saveAwardsRemote(){
