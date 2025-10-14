@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PROGRAMA DE FIDELIZACIÓN INGEPUNTOS</title>
+  <style>
+    :root{--bg:#f8fafc;--card:#fff;--fg:#0f172a;--muted:#64748b;--border:#e2e8f0;--brand:#111827}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--fg);font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Arial,sans-serif}
+    .container{max-width:1100px;margin:0 auto;padding:16px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+    .btn{background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px 12px;cursor:pointer}
+    .btn.primary{background:var(--brand);color:#fff;border-color:#111827}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,.04);padding:12px}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-top:1px solid var(--border);padding:8px;text-align:left;font-size:14px}
+    thead th{background:#f1f5f9;font-weight:600}
+    .muted{color:var(--muted)} .kpi{font-size:26px;font-weight:700}
+    .input{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:10px}
+    .hidden{display:none !important} .nowrap{white-space:nowrap}
+    .tabs{display:flex;gap:8px;margin:10px 0 14px;flex-wrap:wrap}
+    .tab{padding:8px 12px;border:1px solid var(--border);border-radius:10px;background:#fff;cursor:pointer}
+    .tab.active{background:#111827;color:#fff;border-color:#111827}
+    textarea.paste{width:100%;height:160px;border:1px dashed var(--border);border-radius:10px;padding:8px}
+    #debug{margin-top:10px;color:#b91c1c}
+  </style>
+</head>
+<body>
+  <div class="container" id="app">
+    <div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <div>
+        <h1 style="margin:0">PROGRAMA DE FIDELIZACIÓN INGEPUNTOS</h1>
+        <div class="muted" style="font-size:13px">Formato recomendado: CSV. Calculamos puntos base (equipos: 1 pt c/ $1.000.000; servicios: 3 pts c/ $500.000).</div>
+      </div>
+      <div class="right">
+        <button class="btn" data-action="export-clients">⬇️ Exportar clientes</button>
+        <button class="btn" data-action="clear">🗑️ Limpiar todo</button>
+      </div>
+    </div>
+
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="clientes">Clientes</button>
+      <button class="tab" data-tab="ventas">Ventas</button>
+      <button class="tab" data-tab="puntos">Puntos</button>
+      <button class="tab" data-tab="catalogo">Catálogo de premios</button>
+      <button class="tab" data-tab="redencion">Redención</button>
+      <button class="tab" data-tab="historico">Histórico de Redenciones</button>
+    </div>
+
+    <!-- CLIENTES -->
+    <section id="tab-clientes">
+      <div class="card" style="margin-bottom:12px">
+        <h3 style="margin-top:0">Cargar clientes (CSV) o pegar desde Excel</h3>
+        <div class="muted">Cabecera: <code>Nombre de la cuenta</code> (en cualquier fila).</div>
+        <div class="row" style="margin:10px 0">
+          <input id="fileClients" type="file" accept=".csv" />
+          <button class="btn primary" data-action="proc-clients">Procesar CSV</button>
+          <a id="tplClients" class="btn" download="maestro-clientes-ejemplo.csv">Plantilla CSV</a>
+        </div>
+        <div class="muted" style="margin:6px 0 4px">O pega desde Excel/Sheets (Ctrl+V):</div>
+        <textarea id="pasteClients" class="paste" placeholder="Incluye la fila con 'Nombre de la cuenta'"></textarea>
+        <div class="row" style="margin:6px 0 0">
+          <button class="btn" data-action="proc-paste">Procesar pegado</button>
+        </div>
+        <div id="resClients" class="muted" style="margin-top:8px">—</div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="margin-bottom:8px">
+          <div class="muted">Clientes en programa</div>
+          <div id="kpiClientes" class="kpi">0</div>
+        </div>
+        <div class="row" style="margin-bottom:8px">
+          <input id="qClientes" class="input" placeholder="Buscar por razón social..." />
+          <button class="btn" data-action="buscar-clientes">Buscar</button>
+        </div>
+        <div style="overflow:auto">
+          <table>
+            <thead><tr><th>Razón social</th></tr></thead>
+            <tbody id="tbClientes"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- VENTAS -->
+    <section id="tab-ventas" class="hidden">
+      <div class="card" style="margin-bottom:12px">
+        <h3 style="margin-top:0">Cargar ventas (.csv)</h3>
+        <div class="muted">Cabeceras mínimas: <code>Nombre de la cuenta</code> (o <code>RazonSocial</code>) y <code>Importe</code> (acepta: <code>Suma de importes</code>, <code>Subtotal</code>, <code>Total</code>). Opcional: <code>Tipo</code> (EQUIPO/SERVICIO_INGENIERIA).</div>
+        <div class="row" style="margin:10px 0">
+          <input id="fileSales" type="file" accept=".csv" />
+          <button class="btn primary" data-action="proc-sales">Procesar ventas</button>
+          <a id="tplSales" class="btn" download="ventas-ejemplo.csv">Plantilla CSV</a>
+        </div>
+        <!-- Compras facturado -->
+        <div class="row" style="margin:6px 0">
+          <input id="fileInvoiced" type="file" accept=".csv" />
+          <button class="btn" data-action="proc-invoiced">Procesar Compras facturado</button>
+        </div>
+        <div id="resSales" class="muted">—</div>
+      </div>
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h3 style="margin:0">Ventas por cliente</h3>
+          <small class="muted">Ordenado por suma de importes (desc)</small>
+        </div>
+        <div style="overflow:auto">
+          <table>
+            <thead><tr><th>Nombre de cliente</th><th>Recuento de registros</th><th>Suma de importes</th><th>Compras facturado</th></tr></thead>
+            <tbody id="tbVentas"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- PUNTOS -->
+    <section id="tab-puntos" class="hidden">
+      <div class="card" style="margin-bottom:12px">
+        <h3 style="margin-top:0">Reglas (vigentes)</h3>
+        <div id="reglasTxt" class="muted">—</div>
+      </div>
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h3 style="margin:0">Puntos por cliente</h3>
+          <small class="muted">Ordenado por suma de importes (desc)</small>
+        </div>
+        <div style="overflow:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre de cliente</th>
+                <th>Suma de importes</th>
+                <th> Ingpuntos totales acumulados</th>
+                <th>Ingepuntos disponibles</th>
+                <th>Ingepuntos redimidos</th>
+              </tr>
+            </thead>
+            <tbody id="tbPuntos"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- CATÁLOGO DE PREMIOS -->
+    <section id="tab-catalogo" class="hidden">
+      <div class="card" style="margin-bottom:12px">
+        <h3 style="margin-top:0">Catálogo de premios</h3>
+        <div class="muted">Carga tu catálogo (<b>CSV</b>) o agrega premios. Cabeceras aceptadas para puntos: <code>Ingepuntos</code>, <code>Ingpuntos</code>, <code>Puntos</code>, <code>Puntos requeridos</code>, <code>Costo</code>, <code>Costo (puntos)</code>. Para la descripción: <code>Descripción del premio</code>, <code>Descripción</code>, <code>Premio</code>.</div>
+        <div class="row" style="margin:10px 0">
+          <input id="fileAwards" type="file" accept=".csv" />
+          <button class="btn" data-action="proc-awards">Cargar catálogo (CSV)</button>
+          <a id="tplAwards" class="btn" download="premios-ejemplo.csv">Plantilla CSV</a>
+          <button class="btn" data-action="export-awards">Exportar catálogo</button>
+        </div>
+        <div class="row" style="gap:6px;margin:10px 0">
+          <input id="newAwardPts" class="input" placeholder="Ingepuntos" type="number" min="1" style="max-width:160px" />
+          <input id="newAwardDesc" class="input" placeholder="Descripción del premio" />
+          <button class="btn primary" data-action="add-award">Agregar premio</button>
+        </div>
+        <div id="resAwards" class="muted">—</div>
+      </div>
+      <div class="card">
+        <div style="overflow:auto">
+          <table>
+            <thead><tr><th>Ingepuntos</th><th>Descripción del premio</th><th></th></tr></thead>
+            <tbody id="tbAwards"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- REDENCIÓN -->
+    <section id="tab-redencion" class="hidden">
+      <div class="card">
+        <h3 style="margin-top:0">Redención de puntos</h3>
+        <div class="row" style="margin:8px 0">
+          <input id="inpRedeemClient" class="input" placeholder="Ingresar nombre de cliente" list="dlClientes" />
+          <datalist id="dlClientes"></datalist>
+        </div>
+        <div class="row" style="margin:8px 0">
+          <div class="muted">Ingepuntos disponibles: <b id="kpiDisp">0</b></div>
+        </div>
+        <div class="row" style="margin:8px 0">
+          <input id="inpRedeemPts" class="input" placeholder="Cantidad de ingepuntos a redimir (opcional)" type="number" min="1" />
+          <button class="btn" data-action="simulate">Simular</button>
+        </div>
+        <div id="simAwards" class="muted">—</div>
+      </div>
+    </section>
+
+    <!-- HISTÓRICO -->
+    <section id="tab-historico" class="hidden">
+      <div class="card">
+        <h3 style="margin-top:0">Histórico de Redenciones</h3>
+        <div style="overflow:auto">
+          <table>
+            <thead><tr><th>Fecha</th><th>Cliente</th><th>Ingepuntos</th><th>Premio</th></tr></thead>
+            <tbody id="tbHist"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <div id="debug" class="muted"></div>
+  </div>
+
+<script>
+// ===== Estado
+var state={ clientes:[], ventas:[], facturas:[], redenciones:[], premios:[], reglas:{ equipos:{umbral:1000000,puntos:1}, servicios:{umbral:500000,puntos:3} } };
+
+// ===== Utils
+function $(s,root){return (root||document).querySelector(s)}
+function $all(s,root){return Array.from((root||document).querySelectorAll(s))}
+function slug(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim()}
+function money(n){return Number(n||0).toLocaleString('es-CO')}
+function setText(sel,txt){var el=$(sel); if(el) el.textContent=txt}
+function showError(msg){setText('#debug','⚠️ '+msg)}
+
+function parseMoney(v){
+  var s=String(v==null?'':v).trim();
+  if(!s) return 0;
+  s=s.replace(/[$ CcOoPp]/g,'');
+  if(s.length>=3){var t=s.slice(-3); if((t[0]==='.'||t[0]===',') && /\d\d/.test(t.slice(1))) s=s.slice(0,-3)}
+  s=s.replace(/[^0-9-]/g,'');
+  var n=Number(s); return isNaN(n)?0:n;
+}
+
+// CSV: detecta separador mirando varias filas y salta títulos
+function splitCSV(text){
+  var raw=(text||'').replace(/^\uFEFF/,'');
+  var lines=raw.split(/\r?\n/).filter(function(l){return l!=null});
+  if(!lines.length) return [];
+  var cand=[',',';','\t','|'];
+  var best=',',score=-1, seen=0;
+  for(var i=0;i<lines.length && seen<10;i++){
+    var L=lines[i]; if(!L||/^\s*$/.test(L)) continue; seen++;
+    var sc=cand.map(function(d){return (L.split(d).length-1)});
+    var m=Math.max.apply(Math,sc); if(m>score){score=m; best=cand[sc.indexOf(m)]}
+  }
+  if(score<=0) best=',';
+  return lines.filter(Boolean).map(function(l){return l.split(best).map(function(x){return String(x).replace(/^"|"$/g,'').trim()})});
+}
+function findHeaderRow(rows, need){
+  for(var i=0;i<Math.min(60,rows.length);i++){
+    var upp=(rows[i]||[]).map(slug);
+    var ok=need.every(function(k){return upp.indexOf(k)>=0});
+    if(ok) return {index:i,row:rows[i]};
+  }
+  return null;
+}
+function headIndex(arr){var m={}; (arr||[]).forEach(function(h,i){m[slug(h)]=i}); return m}
+
+// ===== Clientes
+function parseClientsText(text){
+  var rows=splitCSV(text);
+  var hdr=findHeaderRow(rows,['NOMBRE DE LA CUENTA']);
+  if(!hdr) return {ok:false,reason:'No encontré el encabezado (Nombre de la cuenta).'}
+  var H=headIndex(hdr.row), idx=H['NOMBRE DE LA CUENTA'];
+  var body=rows.slice(hdr.index+1);
+  var out=body.map(function(r){return {nombre:r[idx]}}).filter(function(r){return String(r.nombre||'').trim()});
+  return {ok:true,rows:out};
+}
+function upsertClientes(rows){var ok=0; rows.forEach(function(r){var n=String(r.nombre||'').trim(); if(!n) return; if(!state.clientes.some(function(c){return slug(c.razonSocial)===slug(n)})){state.clientes.push({razonSocial:n});} ok++;}); return ok}
+function renderClientes(){ setText('#kpiClientes',state.clientes.length); var q=slug(($('#qClientes')||{value:''}).value); var tb=$('#tbClientes'); if(!tb) return; tb.innerHTML=''; state.clientes.filter(function(c){return !q||slug(c.razonSocial).includes(q)}).sort(function(a,b){return a.razonSocial.localeCompare(b.razonSocial)}).forEach(function(c){var tr=document.createElement('tr'); tr.innerHTML='<td>'+c.razonSocial+'</td>'; tb.appendChild(tr)}); var dl=$('#dlClientes'); if(dl){dl.innerHTML=state.clientes.map(function(c){return '<option value="'+c.razonSocial.replace(/"/g,'&quot;')+'">'}).join('')}}
+
+// ===== Ventas
+function parseSalesText(text){
+  var rows=splitCSV(text), hdr=null, idx=0;
+  for(var i=0;i<Math.min(60,rows.length);i++){
+    var upp=(rows[i]||[]).map(slug);
+    var hasName=(upp.indexOf('NOMBRE DE LA CUENTA')>=0||upp.indexOf('RAZONSOCIAL')>=0);
+    var hasAmt=(upp.indexOf('SUMA DE IMPORTES')>=0||upp.indexOf('SUMA DE IMPORTE')>=0||upp.indexOf('IMPORTE')>=0||upp.indexOf('SUBTOTAL')>=0||upp.indexOf('TOTAL')>=0);
+    if(hasName&&hasAmt){hdr=rows[i]; idx=i; break}
+  }
+  if(!hdr) return {ok:false,reason:'Se requiere Nombre de la cuenta/RazonSocial y Importe/Subtotal/Total.'}
+  var H=headIndex(hdr);
+  var iName=H['RAZONSOCIAL']!=null?H['RAZONSOCIAL']:H['NOMBRE DE LA CUENTA'];
+  var iAmt=H['SUMA DE IMPORTES']!=null?H['SUMA DE IMPORTES']:(H['SUMA DE IMPORTE']!=null?H['SUMA DE IMPORTE']:(H['IMPORTE']!=null?H['IMPORTE']:(H['SUBTOTAL']!=null?H['SUBTOTAL']:H['TOTAL'])));
+  var iTipo=H['TIPO'];
+  var body=rows.slice(idx+1);
+  var out=body.filter(function(r){return r&&r.some(function(c){return String(c).trim()!==''})}).map(function(r){return {nombre:r[iName], importe:parseMoney(r[iAmt]), tipo:(iTipo!=null? String(r[iTipo]||'').toUpperCase():'EQUIPO')}});
+  return {ok:true,rows:out};
+}
+function addVenta(v){
+  var n=String(v.nombre||'').trim(); if(!n) return;
+  var cli=state.clientes.find(function(c){return slug(c.razonSocial)===slug(n)});
+  if(!cli){cli={razonSocial:n}; state.clientes.push(cli);} 
+  state.ventas.push({cliente:cli.razonSocial, importe:Number(v.importe)||0, tipo:String(v.tipo||'EQUIPO').toUpperCase()})
+}
+function renderVentas(){
+  var sum={}, cnt={}, fac={};
+  state.ventas.forEach(function(v){var k=slug(v.cliente); sum[k]=(sum[k]||0)+Number(v.importe||0); cnt[k]=(cnt[k]||0)+1});
+  state.facturas.forEach(function(f){var k=slug(f.cliente); fac[k]=(fac[k]||0)+Number(f.importe||0)});
+  var tb=$('#tbVentas'); if(!tb) return; tb.innerHTML='';
+  var rows=state.clientes.map(function(c){
+    var k=slug(c.razonSocial);
+    return {nombre:c.razonSocial, suma:sum[k]||0, recs:cnt[k]||0, fact:(fac[k]||0)} 
+  }).sort(function(a,b){return b.suma-a.suma});
+  rows.forEach(function(r){
+    var tr=document.createElement('tr');
+    tr.innerHTML='<td>'+r.nombre+'</td><td class="nowrap">'+r.recs+'</td><td class="nowrap">'+money(r.suma)+'</td><td class="nowrap">'+money(r.fact)+'</td>'; 
+    tb.appendChild(tr)
+  })
+}
+
+// ===== Puntos
+function puntosPorVenta(v){var sub=Number(v.importe)||0; var tipo=String(v.tipo||'EQUIPO').toUpperCase(); var R=state.reglas; if(tipo==='SERVICIO_INGENIERIA'){return Math.floor(sub/R.servicios.umbral)*R.servicios.puntos;} return Math.floor(sub/R.equipos.umbral)*R.equipos.puntos}
+function renderPuntos(){ var by={}; state.ventas.forEach(function(v){var k=slug(v.cliente); if(!by[k]) by[k]={suma:0,pts:0,red:0,nombre:v.cliente}; by[k].suma+=Number(v.importe||0); by[k].pts+=puntosPorVenta(v)}); state.redenciones.forEach(function(r){var k=slug(r.cliente); if(!by[k]) by[k]={suma:0,pts:0,red:0,nombre:r.cliente}; by[k].red+=Number(r.puntos||0)}); var tb=$('#tbPuntos'); if(!tb) return; tb.innerHTML=''; var rows=state.clientes.map(function(c){var k=slug(c.razonSocial); var d=by[k]||{suma:0,pts:0,red:0}; return {nombre:c.razonSocial,suma:d.suma,pts:d.pts,red:d.red,disp:Math.max(d.pts-d.red,0)}}).sort(function(a,b){return b.suma-a.suma}); rows.forEach(function(r){var tr=document.createElement('tr'); tr.innerHTML='<td>'+r.nombre+'</td><td class="nowrap">'+money(r.suma)+'</td><td class="nowrap">'+r.pts+'</td><td class="nowrap">'+r.disp+'</td><td class="nowrap">'+r.red+'</td>'; tb.appendChild(tr)})}
+function setupReglas(){ var R=state.reglas; var html='<ul style="margin:6px 0 0 16px">'+ '<li>Equipos: 1 punto por cada <b>$'+R.equipos.umbral.toLocaleString('es-CO')+'</b>.</li>'+ '<li>Servicios de ingeniería: <b>'+R.servicios.puntos+'</b> puntos por cada <b>$'+R.servicios.umbral.toLocaleString('es-CO')+'</b> (si la columna Tipo = SERVICIO_INGENIERIA).</li>'+ '</ul>'; setText('#reglasTxt',html)}
+
+// ===== Catálogo de premios
+function normHeader(h){
+  var s=String(h==null?'':h);
+  s=s.replace(/Ã¡/g,'á').replace(/Ã©/g,'é').replace(/Ã­/g,'í').replace(/Ã³/g,'ó').replace(/Ãº/g,'ú')
+     .replace(/Ã±/g,'ñ').replace(/Ã/g,'Á').replace(/Ã‰/g,'É').replace(/Ã/g,'Í').replace(/Ã“/g,'Ó')
+     .replace(/Ãš/g,'Ú').replace(/Ã‘/g,'Ñ');
+  return slug(s);
+}
+function idxMapMJB(arr){ var m={}; (arr||[]).forEach(function(h,i){ m[normHeader(h)]=i; }); return m; }
+function parseAwardsText(text){
+  var rows=splitCSV(text); if(!rows.length) return {ok:false,reason:'Archivo vacío'}; var hdr=null,idx=0;
+  for(var i=0;i<Math.min(60,rows.length);i++){
+    var upp=(rows[i]||[]).map(normHeader);
+    var okPts=(upp.indexOf('INGEPUNTOS')>=0||upp.indexOf('INGPUNTOS')>=0||upp.indexOf('PUNTOS')>=0||upp.indexOf('PUNTOS REQUERIDOS')>=0||upp.indexOf('COSTO')>=0||upp.indexOf('COSTO (PUNTOS)')>=0);
+    var okDesc=(upp.indexOf('DESCRIPCION DEL PREMIO')>=0||upp.indexOf('DESCRIPCION')>=0||upp.indexOf('PREMIO')>=0);
+    if(okPts&&okDesc){hdr=rows[i]; idx=i; break}
+  }
+  if(!hdr) return {ok:false,reason:'Cabeceras requeridas: puntos (Ingepuntos/Puntos/Costo) y descripción (Descripción del premio/Descripción/Premio).'};
+  var H=idxMapMJB(hdr);
+  var iPts = H['INGEPUNTOS']!=null?H['INGEPUNTOS']:(H['INGPUNTOS']!=null?H['INGPUNTOS']:(H['PUNTOS REQUERIDOS']!=null?H['PUNTOS REQUERIDOS']:(H['PUNTOS']!=null?H['PUNTOS']:(H['COSTO (PUNTOS)']!=null?H['COSTO (PUNTOS)']:H['COSTO']))));
+  var iDesc= H['DESCRIPCION DEL PREMIO']!=null?H['DESCRIPCION DEL PREMIO']:(H['DESCRIPCION']!=null?H['DESCRIPCION']:H['PREMIO']);
+  var body=rows.slice(idx+1);
+  var out=body.filter(function(r){return r&&r.some(function(c){return String(c).trim()!==''})}).map(function(r){return {umbral:Number(String(r[iPts]||'').replace(/[^0-9-]/g,''))||0, desc:String(r[iDesc]||'').trim()}});
+  return {ok:true,rows:out}
+}
+function renderAwards(){ var tb=$('#tbAwards'); if(!tb) return; tb.innerHTML=''; (state.premios||[]).slice().sort(function(a,b){return a.umbral-b.umbral}).forEach(function(p,i){var tr=document.createElement('tr'); tr.innerHTML='<td>'+p.umbral+'</td><td>'+p.desc+'</td><td><button class="btn" data-action="del-award" data-idx="'+i+'">Eliminar</button></td>'; tb.appendChild(tr)})}
+
+// ===== Redención & histórico
+function puntosDisponibles(nombre){ var pts=0,red=0,key=slug(nombre); state.ventas.filter(function(v){return slug(v.cliente)===key}).forEach(function(v){pts+=puntosPorVenta(v)}); state.redenciones.filter(function(r){return slug(r.cliente)===key}).forEach(function(r){red+=Number(r.puntos||0)}); return Math.max(pts-red,0) }
+function renderHist(){ var tb=$('#tbHist'); if(!tb) return; tb.innerHTML=''; (state.redenciones||[]).slice().sort(function(a,b){return String(b.fecha||'').localeCompare(String(a.fecha||''))}).forEach(function(r){ var d=new Date(r.fecha); var f=isNaN(d)?r.fecha:d.toLocaleString('es-CO'); var tr=document.createElement('tr'); tr.innerHTML='<td>'+f+'</td><td>'+r.cliente+'</td><td>'+r.puntos+'</td><td>'+(r.premio||'')+'</td>'; tb.appendChild(tr) })}
+
+// ===== Handlers
+function parseInvoicedText(text){ var rows=splitCSV(text), hdr=null, idx=0; for(var i=0;i<Math.min(60,rows.length);i++){ var upp=(rows[i]||[]).map(slug); var hasName=(upp.indexOf('NOMBRE DE LA CUENTA')>=0||upp.indexOf('RAZONSOCIAL')>=0||upp.indexOf('NOMBRE TERCERO')>=0||upp.indexOf('NOMBRE_TERCERO')>=0||upp.indexOf('CLIENTE')>=0); var hasAmt=(upp.indexOf('FACTURADO')>=0||upp.indexOf('VALOR BRUTO')>=0||upp.indexOf('VALOR_BRUTO')>=0||upp.indexOf('IMPORTE')>=0||upp.indexOf('TOTAL')>=0||upp.indexOf('SUBTOTAL')>=0); if(hasName&&hasAmt){ hdr=rows[i]; idx=i; break; } } if(!hdr) return {ok:false,reason:'Se requiere columna de cliente y monto (Facturado/Valor Bruto/Importe/Total/Subtotal).'}; var H=headIndex(hdr); var iName= H['RAZONSOCIAL']!=null?H['RAZONSOCIAL']:(H['NOMBRE TERCERO']!=null?H['NOMBRE TERCERO']:(H['NOMBRE_TERCERO']!=null?H['NOMBRE_TERCERO']:(H['CLIENTE']!=null?H['CLIENTE']:H['NOMBRE DE LA CUENTA']))); var iAmt = H['FACTURADO']!=null?H['FACTURADO']:(H['VALOR BRUTO']!=null?H['VALOR BRUTO']:(H['VALOR_BRUTO']!=null?H['VALOR_BRUTO']:(H['IMPORTE']!=null?H['IMPORTE']:(H['TOTAL']!=null?H['TOTAL']:H['SUBTOTAL'])))); var body=rows.slice(idx+1); var out=body.filter(function(r){return r&&r.some(function(c){return String(c).trim()!==''})}).map(function(r){ return { nombre:r[iName], importe:parseMoney(r[iAmt]) }; }); return {ok:true, rows:out}; }
+var actions={
+  'proc-clients': function(){ var f=$('#fileClients').files[0]; if(!f) return alert('Selecciona un .csv'); f.text().then(parseClientsText).then(function(r){ if(!r.ok) return setText('#resClients',r.reason); var ok=upsertClientes(r.rows); setText('#resClients','OK: '+ok); renderClientes(); renderVentas(); renderPuntos(); }).catch(function(e){showError(e.message||e)}) },
+  'proc-paste': function(){ var t=($('#pasteClients')||{value:''}).value; if(!t.trim()) return alert('Pega primero la tabla'); var r=parseClientsText(t.replace(/\t/g,',')); if(!r.ok) return setText('#resClients',r.reason); var ok=upsertClientes(r.rows); setText('#resClients','OK: '+ok); renderClientes(); renderVentas(); renderPuntos(); },
+  'buscar-clientes': function(){ renderClientes(); },
+  'proc-sales': function(){ var f=$('#fileSales').files[0]; if(!f) return alert('Selecciona el .csv de ventas'); f.text().then(parseSalesText).then(function(r){ if(!r.ok) return setText('#resSales',r.reason); var ok=0; r.rows.forEach(function(row){ addVenta(row); ok++; }); setText('#resSales','Ventas cargadas: '+ok); renderVentas(); renderPuntos(); renderHist(); }).catch(function(e){showError(e.message||e)}) },
+  'proc-invoiced': function(){ var f=$('#fileInvoiced').files[0]; if(!f) return alert('Selecciona el CSV de Compras facturado'); f.text().then(parseInvoicedText).then(function(r){ if(!r.ok) return setText('#resSales',r.reason); var ok=0; r.rows.forEach(function(row){ var n=String(row.nombre||'').trim(); if(!n) return; state.facturas.push({cliente:n, importe:Number(row.importe)||0}); ok++; }); setText('#resSales','Compras facturado cargadas: '+ok); renderVentas(); renderPuntos(); }).catch(function(e){showError(e.message||e)}) },
+  'export-clients': function(){ var csv='Nombre de la cuenta\n'+state.clientes.map(function(c){return '"'+c.razonSocial.replace(/"/g,'""')+'"'}).join('\n'); var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='clientes-ingepuntos.csv'; a.click(); },
+  'clear': function(){ if(!confirm('¿Borrar clientes, ventas, facturas, premios y redenciones?')) return; state.clientes=[]; state.ventas=[]; state.facturas=[]; state.premios=[]; state.redenciones=[]; renderClientes(); renderVentas(); renderPuntos(); renderAwards(); renderHist(); setText('#resClients','—'); setText('#resSales','—'); setText('#resAwards','—'); setText('#kpiDisp','0'); setText('#simAwards','—'); },
+  'proc-awards': function(){ var f=$('#fileAwards').files[0]; if(!f) return alert('Selecciona el CSV del catálogo'); f.text().then(parseAwardsText).then(function(r){ if(!r.ok) return setText('#resAwards',r.reason); state.premios=r.rows.filter(function(p){return p.umbral>0&&p.desc}); setText('#resAwards','Premios cargados: '+state.premios.length); renderAwards(); }).catch(function(e){showError(e.message||e)}) },
+  'add-award': function(){ var pts=Number(($('#newAwardPts')||{value:'0'}).value)||0; var desc=(($('#newAwardDesc')||{value:''}).value||'').trim(); if(pts<=0||!desc) return alert('Completa Ingepuntos y Descripción'); state.premios.push({umbral:pts,desc:desc}); $('#newAwardPts').value=''; $('#newAwardDesc').value=''; renderAwards(); setText('#resAwards','Premios: '+state.premios.length) },
+  'del-award': function(el){ var idx=Number(el.getAttribute('data-idx')); state.premios.splice(idx,1); renderAwards(); setText('#resAwards','Premios: '+state.premios.length) },
+  'export-awards': function(){ var csv='Ingepuntos,Descripción del premio\n'+(state.premios||[]).map(function(p){return '"'+p.umbral+'","'+p.desc.replace(/"/g,'""')+'"'}).join('\n'); var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='catalogo-premios.csv'; a.click(); },
+  'simulate': function(){ var nombre=(($('#inpRedeemClient')||{value:''}).value||'').trim(); var req=Number((($('#inpRedeemPts')||{value:'0'}).value)||0)||0; var disp=nombre?puntosDisponibles(nombre):0; setText('#kpiDisp',disp); var usable=(req>0?Math.min(req,disp):disp); var list=state.premios||[]; var base='<div class="muted">Puntos disponibles: <b>'+disp+'</b></div>'; if(!list.length){ return setText('#simAwards', base+'\nAún no hay premios configurados.'); } var opts=list.filter(function(p){return p.umbral<=usable}).sort(function(a,b){return a.umbral-b.umbral}); if(!opts.length){ return setText('#simAwards', base+'\nNo hay premios con los puntos indicados.'); } var html=base+'<div style="overflow:auto;margin-top:8px"><table><thead><tr><th>Ingepuntos</th><th>Descripción</th><th></th></tr></thead><tbody>'+opts.map(function(p,i){return '<tr><td>'+p.umbral+'</td><td>'+p.desc+'</td><td><button class="btn" data-action="redeem" data-pts="'+p.umbral+'" data-desc="'+p.desc.replace(/"/g,'&quot;')+'">Registrar redención</button></td></tr>'}).join('')+'</tbody></table></div>'; $('#simAwards').innerHTML=html; },
+  'redeem': function(el){ var nombre=(($('#inpRedeemClient')||{value:''}).value||'').trim(); var pts=Number(el.getAttribute('data-pts'))||0; var desc=el.getAttribute('data-desc')||''; if(!nombre) return alert('Ingresa el nombre del cliente'); var disp=puntosDisponibles(nombre); if(pts>disp) return alert('Puntos insuficientes. Disponibles: '+disp); state.redenciones.push({cliente:nombre,puntos:pts,premio:desc,fecha:new Date().toISOString()}); alert('Redención registrada'); renderPuntos(); renderHist(); actions['simulate'](); }
+};
+
+// Delegación global de clicks
+$('#app').addEventListener('click', function(ev){ var el=ev.target.closest('[data-action]'); if(!el) return; var act=el.getAttribute('data-action'); var fn=actions[act]; if(!fn) return; try{ fn.length? fn(el) : fn(); }catch(e){ showError(e.message||e); } }, true);
+
+// Tabs
+$('#tabs').addEventListener('click', function(ev){ var b=ev.target.closest('.tab'); if(!b) return; $all('.tab').forEach(function(x){x.classList.remove('active')}); b.classList.add('active'); ['clientes','ventas','puntos','catalogo','redencion','historico'].forEach(function(id){ var sec=$('#tab-'+id); if(sec) sec.classList.add('hidden'); }); var id=b.getAttribute('data-tab'); var s=$('#tab-'+id); if(s) s.classList.remove('hidden'); });
+
+// Plantillas CSV
+(function(){ $('#tplClients').href='data:text/csv;charset=utf-8,'+encodeURIComponent('Nombre de la cuenta\nACME MANUFACTURAS S.A.S\nINTEGRADORA XYZ S.A.S\nDISTRIBUCIONES ANDINAS S.A.S\nINGETES INGENIERIA S.A.S\n'); $('#tplSales').href='data:text/csv;charset=utf-8,'+encodeURIComponent('Nombre de la cuenta,Importe,Tipo\nACME MANUFACTURAS S.A.S,2300000,EQUIPO\nACME MANUFACTURAS S.A.S,1200000,SERVICIO_INGENIERIA\nINTEGRADORA XYZ S.A.S,600000,SERVICIO_INGENIERIA\n'); $('#tplAwards').href='data:text/csv;charset=utf-8,'+encodeURIComponent('Ingepuntos,Descripción del premio\n50,Parlante Echo Dot de Amazon\n50,Bono redimible sin condiciones por $500.000\n50,Bono para compra de equipos por $700.000 (aplican condiciones)\n'); })();
+
+// Reglas
+setupReglas();
+
+// Render inicial
+renderClientes(); renderVentas(); renderPuntos(); renderAwards(); renderHist();
+
+// Captura errores no atrapados
+window.addEventListener('error', function(e){ showError(e.message||'Error de script'); });
+</script>
+</body>
+</html>
