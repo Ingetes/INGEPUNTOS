@@ -1,10 +1,6 @@
 {
   "premios": [
     {
-      "umbral": 2,
-      "desc": "aaa"
-    },
-    {
       "umbral": 35,
       "desc": "1 parlante Echo Dot de Amazon."
     }
