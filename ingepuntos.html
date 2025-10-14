@@ -379,7 +379,9 @@ const CLIENTS_XLSX_PATH = './Base%20de%20datos%20clientes.xlsx';
 const SALES_XLSX_PATH = './Ventas.xlsx';
 const INVOICED_XLSX_PATH = './Compras_Facturado_Resumen.xlsx';
 const AWARDS_JSON_PATH = './Premios.json';
-
+// Endpoint que apunta al repo IN GEPUNTOS (no al de cotizaciones)
+const API_AWARDS_URL = 'https://portal-api-nine.vercel.app/api/premios?repo=ingepuntos';
+const ADMIN_KEY_AW   = 'admin';
 // Dispara carga automática de ventas y compras facturado
 loadClientsFromWorkbookUrl(CLIENTS_XLSX_PATH).catch(function(e){showError(e.message || e);});
 loadSalesFromWorkbookUrl(SALES_XLSX_PATH).catch(e => { showError(e.message||e); });
@@ -439,19 +441,13 @@ async function loadAwardsFromJSON(url){
   }
 }
 
-/* ========= Persistencia ========= */
-
-// MODO 1 (recomendado): remoto tipo Vercel API (igual al de ingenieros)
-const API_AWARDS_URL = "https://portal-api-nine.vercel.app/api/premios"; // <-- Ajusta a tu endpoint real
-const ADMIN_KEY_AW   = 'admin';
-
 // Guarda remoto (si API_AWARDS_URL responde). Devuelve true si guardó.
 async function saveAwardsRemote(){
   try{
     const payload = { premios: state.premios.slice().sort((a,b)=>a.umbral-b.umbral) };
     const r = await fetch(API_AWARDS_URL, {
       method: 'PUT',
-      headers: { 'Content-Type':'application/json', 'X-Admin-Key': ADMIN_KEY },
+      headers: { 'Content-Type':'application/json', 'X-Admin-Key': ADMIN_KEY_AW },
       body: JSON.stringify(payload)
     });
     if(!r.ok) throw new Error(await r.text());
