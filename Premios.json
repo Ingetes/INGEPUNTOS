@@ -3,6 +3,10 @@
     {
       "umbral": 35,
       "desc": "1 parlante Echo Dot de Amazon."
+    },
+    {
+      "umbral": 35,
+      "desc": "1 Bono redimible sin condiciones por $200.000. Puede usarse para abonar a la compra de un equipo, abonar al estado de cuenta. No se podrá devolver en dinero en efectivo."
     }
   ]
 }
