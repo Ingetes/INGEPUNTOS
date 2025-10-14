@@ -439,8 +439,8 @@ async function subirArchivoExcel(inputId, rutaEnRepo, etiqueta, statusId){
   return {nombre:f.name, ok:true, msg:'OK'};
 }
 
-// Modal: abrir/cerrar/login
-(function(){
+// Modal: abrir/cerrar/login  (inicializa cuando el DOM ya está listo)
+document.addEventListener('DOMContentLoaded', function(){
   const modal = document.getElementById('settingsModal');
   const openBtn = document.getElementById('openSettings');
   const closeBtn = document.getElementById('closeSettings');
@@ -460,7 +460,6 @@ async function subirArchivoExcel(inputId, rutaEnRepo, etiqueta, statusId){
   }
   function closeModal(){
     modal.style.display='none'; modal.setAttribute('aria-hidden','true');
-    // limpiar inputs
     ['fileClientes','fileVentas','fileCompras'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
     ['statusClientes','statusVentas','statusCompras'].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent=''; });
   }
@@ -483,7 +482,6 @@ async function subirArchivoExcel(inputId, rutaEnRepo, etiqueta, statusId){
     loginView.classList.remove('hidden');
   });
 
-  // Guardar (sube 3 archivos al repo compartido)
   btnSave?.addEventListener('click', async ()=>{
     const res = [];
     res.push(await subirArchivoExcel('fileClientes','Base de datos clientes.xlsx','Base de datos de clientes','statusClientes'));
@@ -496,16 +494,14 @@ async function subirArchivoExcel(inputId, rutaEnRepo, etiqueta, statusId){
     const detalle = seleccionados.map(r=>`${r.nombre} → ${r.ok ? 'OK -> Espera ~5 min' : 'ERROR ('+r.msg+')'}`).join('\n');
     alert(detalle);
 
-    // Romper caché y recargar datos si hubo al menos 1 OK
     if (res.some(x=>x.ok)){
       const v='?v='+Date.now();
-      // volver a cargar bases con cache-busting y refrescar pantallas
       loadClientsFromWorkbookUrl(CLIENTS_XLSX_PATH + v).catch(e=>showError(e.message||e));
       loadSalesFromWorkbookUrl(SALES_XLSX_PATH + v).catch(e=>showError(e.message||e));
       loadInvoicedFromWorkbookUrl(INVOICED_XLSX_PATH + v).catch(e=>showError(e.message||e));
     }
   });
-})();
+});
 
 // ===== Catálogo de premios
 function normHeader(h){
