@@ -54,10 +54,8 @@
       <div class="card" style="margin-bottom:12px">
         <h3 style="margin-top:0">Cargar clientes (XLSX/CSV)</h3>
         <div class="muted">Cabecera: <code>Nombre de la cuenta</code> (en cualquier fila).</div>
-        <div class="row" style="margin:10px 0">
-          <input id="fileClients" type="file" accept=".xlsx,.xls,.csv" />
-          <button class="btn primary" data-action="proc-clients">Procesar clientes</button>
-          <a id="tplClients" class="btn" download="maestro-clientes-ejemplo.csv">Plantilla CSV</a>
+        <div class="muted" style="margin:10px 0">
+          Carga automática desde <code>Base de datos clientes.xlsx</code>
         </div>
         <div id="resClients" class="muted" style="margin-top:8px">—</div>
       </div>
@@ -238,6 +236,26 @@ async function fileToCSV(file){
   return await file.text();
 }
 
+// Convierte un ArrayBuffer de XLSX a CSV (primera hoja)
+async function xlsxArrayBufferToCSV(buf){
+  const wb = XLSX.read(buf, { type:'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_csv(ws);
+}
+
+// Carga y procesa clientes desde un XLSX del servidor (misma carpeta)
+async function loadClientsFromWorkbookUrl(url){
+  const res = await fetch(url, { cache: 'no-store' });
+  if(!res.ok) throw new Error('No pude cargar "'+url+'" ('+res.status+')');
+  const buf = await res.arrayBuffer();
+  const csv = await xlsxArrayBufferToCSV(buf);
+  const r = parseClientsText(csv);
+  if(!r.ok){ setText('#resClients', r.reason); return; }
+  const ok = upsertClientes(r.rows);
+  setText('#resClients', 'OK: '+ok+' (carga automática)');
+  renderClientes(); renderVentas(); renderPuntos();
+}
+
 // CSV: detecta separador mirando varias filas y salta títulos
 function splitCSV(text){
   var raw=(text||'').replace(/^\uFEFF/,'');
@@ -320,6 +338,14 @@ function renderVentas(){
 function puntosPorVenta(v){var sub=Number(v.importe)||0; var tipo=String(v.tipo||'EQUIPO').toUpperCase(); var R=state.reglas; if(tipo==='SERVICIO_INGENIERIA'){return Math.floor(sub/R.servicios.umbral)*R.servicios.puntos;} return Math.floor(sub/R.equipos.umbral)*R.equipos.puntos}
 function renderPuntos(){ var by={}; state.ventas.forEach(function(v){var k=slug(v.cliente); if(!by[k]) by[k]={suma:0,pts:0,red:0,nombre:v.cliente}; by[k].suma+=Number(v.importe||0); by[k].pts+=puntosPorVenta(v)}); state.redenciones.forEach(function(r){var k=slug(r.cliente); if(!by[k]) by[k]={suma:0,pts:0,red:0,nombre:r.cliente}; by[k].red+=Number(r.puntos||0)}); var tb=$('#tbPuntos'); if(!tb) return; tb.innerHTML=''; var rows=state.clientes.map(function(c){var k=slug(c.razonSocial); var d=by[k]||{suma:0,pts:0,red:0}; return {nombre:c.razonSocial,suma:d.suma,pts:d.pts,red:d.red,disp:Math.max(d.pts-d.red,0)}}).sort(function(a,b){return b.suma-a.suma}); rows.forEach(function(r){var tr=document.createElement('tr'); tr.innerHTML='<td>'+r.nombre+'</td><td class="nowrap">'+money(r.suma)+'</td><td class="nowrap">'+r.pts+'</td><td class="nowrap">'+r.disp+'</td><td class="nowrap">'+r.red+'</td>'; tb.appendChild(tr)})}
 function setupReglas(){ var R=state.reglas; var html='<ul style="margin:6px 0 0 16px">'+ '<li>Equipos: 1 punto por cada <b>$'+R.equipos.umbral.toLocaleString('es-CO')+'</b>.</li>'+ '<li>Servicios de ingeniería: <b>'+R.servicios.puntos+'</b> puntos por cada <b>$'+R.servicios.umbral.toLocaleString('es-CO')+'</b> (si la columna Tipo = SERVICIO_INGENIERIA).</li>'+ '</ul>'; setText('#reglasTxt',html)}
+
+// Ruta relativa al mismo folder del index.html en GitHub Pages
+const CLIENTS_XLSX_PATH = './Base%20de%20datos%20clientes.xlsx';
+
+// Dispara carga automática de clientes
+loadClientsFromWorkbookUrl(CLIENTS_XLSX_PATH).catch(function(e){
+  showError(e.message || e);
+});
 
 // ===== Catálogo de premios
 function normHeader(h){
@@ -489,7 +515,7 @@ $('#app').addEventListener('click', function(ev){ var el=ev.target.closest('[dat
 $('#tabs').addEventListener('click', function(ev){ var b=ev.target.closest('.tab'); if(!b) return; $all('.tab').forEach(function(x){x.classList.remove('active')}); b.classList.add('active'); ['clientes','ventas','puntos','catalogo','redencion','historico'].forEach(function(id){ var sec=$('#tab-'+id); if(sec) sec.classList.add('hidden'); }); var id=b.getAttribute('data-tab'); var s=$('#tab-'+id); if(s) s.classList.remove('hidden'); });
 
 // Plantillas CSV
-(function(){ $('#tplClients').href='data:text/csv;charset=utf-8,'+encodeURIComponent('Nombre de la cuenta\nACME MANUFACTURAS S.A.S\nINTEGRADORA XYZ S.A.S\nDISTRIBUCIONES ANDINAS S.A.S\nINGETES INGENIERIA S.A.S\n'); $('#tplSales').href='data:text/csv;charset=utf-8,'+encodeURIComponent('Nombre de la cuenta,Importe,Tipo\nACME MANUFACTURAS S.A.S,2300000,EQUIPO\nACME MANUFACTURAS S.A.S,1200000,SERVICIO_INGENIERIA\nINTEGRADORA XYZ S.A.S,600000,SERVICIO_INGENIERIA\n'); $('#tplAwards').href='data:text/csv;charset=utf-8,'+encodeURIComponent('Ingepuntos,Descripción del premio\n50,Parlante Echo Dot de Amazon\n50,Bono redimible sin condiciones por $500.000\n50,Bono para compra de equipos por $700.000 (aplican condiciones)\n'); })();
+(function(){ $('#tplSales').href='data:text/csv;charset=utf-8,'+encodeURIComponent('Nombre de la cuenta,Importe,Tipo\nACME MANUFACTURAS S.A.S,2300000,EQUIPO\nACME MANUFACTURAS S.A.S,1200000,SERVICIO_INGENIERIA\nINTEGRADORA XYZ S.A.S,600000,SERVICIO_INGENIERIA\n'); $('#tplAwards').href='data:text/csv;charset=utf-8,'+encodeURIComponent('Ingepuntos,Descripción del premio\n50,Parlante Echo Dot de Amazon\n50,Bono redimible sin condiciones por $500.000\n50,Bono para compra de equipos por $700.000 (aplican condiciones)\n'); })();
 
 // Reglas
 setupReglas();
