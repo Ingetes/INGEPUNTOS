@@ -82,16 +82,9 @@
       <div class="card" style="margin-bottom:12px">
         <h3 style="margin-top:0">Cargar ventas (.xlsx/.csv)</h3>
         <div class="muted">Cabeceras mínimas: <code>Nombre de la cuenta</code> (o <code>RazonSocial</code>) y <code>Importe</code> (acepta: <code>Suma de importes</code>, <code>Subtotal</code>, <code>Total</code>). Opcional: <code>Tipo</code> (EQUIPO/SERVICIO_INGENIERIA).</div>
-        <div class="row" style="margin:10px 0">
-          <input id="fileSales" type="file" accept=".xlsx,.xls,.csv" />
-          <button class="btn primary" data-action="proc-sales">Procesar ventas</button>
-          <a id="tplSales" class="btn" download="ventas-ejemplo.csv">Plantilla CSV</a>
-        </div>
-        <!-- Compras facturado -->
-        <div class="row" style="margin:6px 0">
-          <input id="fileInvoiced" type="file" accept=".xlsx,.xls,.csv" />
-          <button class="btn" data-action="proc-invoiced">Procesar Compras facturado</button>
-        </div>
+<div class="muted" style="margin:10px 0">
+  Carga automática desde <code>Ventas.xlsx</code> y <code>Compras_Facturado_Resumen.xlsx</code>
+</div>
         <div id="resSales" class="muted">—</div>
       </div>
       <div class="card">
@@ -255,6 +248,39 @@ async function loadClientsFromWorkbookUrl(url){
   renderClientes(); renderVentas(); renderPuntos();
 }
 
+// Carga y procesa ventas desde un XLSX del servidor
+async function loadSalesFromWorkbookUrl(url){
+  const res = await fetch(url, { cache: 'no-store' });
+  if(!res.ok) throw new Error('No pude cargar "'+url+'" ('+res.status+')');
+  const buf = await res.arrayBuffer();
+  const csv = await xlsxArrayBufferToCSV(buf);
+  const r = parseSalesText(csv);
+  if(!r.ok){ setText('#resSales', r.reason); return; }
+  let ok = 0;
+  r.rows.forEach(row => { addVenta(row); ok++; });
+  setText('#resSales', 'Ventas cargadas: '+ok+' (auto)');
+  renderVentas(); renderPuntos(); renderHist();
+}
+
+// Carga y procesa Compras facturado desde un XLSX del servidor
+async function loadInvoicedFromWorkbookUrl(url){
+  const res = await fetch(url, { cache: 'no-store' });
+  if(!res.ok) throw new Error('No pude cargar "'+url+'" ('+res.status+')');
+  const buf = await res.arrayBuffer();
+  const csv = await xlsxArrayBufferToCSV(buf);
+  const r = parseInvoicedText(csv);
+  if(!r.ok){ setText('#resSales', r.reason); return; }
+  let ok = 0;
+  (r.rows||[]).forEach(row => {
+    const n = String(row.nombre||'').trim(); if(!n) return;
+    state.facturas.push({ cliente:n, importe:Number(row.importe)||0 });
+    ok++;
+  });
+  // Si ya cargaste ventas, esto actualizará la columna "Compras facturado"
+  setText('#resSales', 'Compras facturado cargadas: '+ok+' (auto)');
+  renderVentas(); renderPuntos();
+}
+
 // CSV: detecta separador mirando varias filas y salta títulos
 function splitCSV(text){
   var raw=(text||'').replace(/^\uFEFF/,'');
@@ -340,12 +366,13 @@ function setupReglas(){ var R=state.reglas; var html='<ul style="margin:6px 0 0 
 
 // Ruta relativa al mismo folder del index.html en GitHub Pages
 const CLIENTS_XLSX_PATH = './Base%20de%20datos%20clientes.xlsx';
+const SALES_XLSX_PATH = './Ventas.xlsx';
+const INVOICED_XLSX_PATH = './Compras_Facturado_Resumen.xlsx';
 
-// Dispara carga automática de clientes
-loadClientsFromWorkbookUrl(CLIENTS_XLSX_PATH).catch(function(e){
-  showError(e.message || e);
-});
-
+// Dispara carga automática de ventas y compras facturado
+loadClientsFromWorkbookUrl(CLIENTS_XLSX_PATH).catch(function(e){showError(e.message || e);});
+loadSalesFromWorkbookUrl(SALES_XLSX_PATH).catch(e => { showError(e.message||e); });
+loadInvoicedFromWorkbookUrl(INVOICED_XLSX_PATH).catch(e => { showError(e.message||e); });
 // ===== Catálogo de premios
 function normHeader(h){
   var s=String(h==null?'':h);
@@ -393,32 +420,6 @@ var actions = {
 
   'buscar-clientes': function(){
     renderClientes();
-  },
-
-  'proc-sales': function(){
-    var f = $('#fileSales').files[0];
-    if(!f) return alert('Selecciona el XLSX/CSV de ventas');
-    fileToCSV(f).then(parseSalesText).then(function(r){
-      if(!r.ok) return setText('#resSales',r.reason);
-      var ok=0; r.rows.forEach(function(row){ addVenta(row); ok++; });
-      setText('#resSales','Ventas cargadas: '+ok);
-      renderVentas(); renderPuntos(); renderHist();
-    }).catch(function(e){showError(e.message||e)});
-  },
-
-  'proc-invoiced': function(){
-    var f = $('#fileInvoiced').files[0];
-    if(!f) return alert('Selecciona el XLSX/CSV de Compras facturado');
-    fileToCSV(f).then(parseInvoicedText).then(function(r){
-      if(!r.ok) return setText('#resSales',r.reason);
-      var ok=0;
-      r.rows.forEach(function(row){
-        var n=String(row.nombre||'').trim(); if(!n) return;
-        state.facturas.push({cliente:n, importe:Number(row.importe)||0}); ok++;
-      });
-      setText('#resSales','Compras facturado cargadas: '+ok);
-      renderVentas(); renderPuntos();
-    }).catch(function(e){showError(e.message||e)});
   },
 
   'export-clients': function(){
@@ -514,7 +515,7 @@ $('#app').addEventListener('click', function(ev){ var el=ev.target.closest('[dat
 $('#tabs').addEventListener('click', function(ev){ var b=ev.target.closest('.tab'); if(!b) return; $all('.tab').forEach(function(x){x.classList.remove('active')}); b.classList.add('active'); ['clientes','ventas','puntos','catalogo','redencion','historico'].forEach(function(id){ var sec=$('#tab-'+id); if(sec) sec.classList.add('hidden'); }); var id=b.getAttribute('data-tab'); var s=$('#tab-'+id); if(s) s.classList.remove('hidden'); });
 
 // Plantillas CSV
-(function(){ $('#tplSales').href='data:text/csv;charset=utf-8,'+encodeURIComponent('Nombre de la cuenta,Importe,Tipo\nACME MANUFACTURAS S.A.S,2300000,EQUIPO\nACME MANUFACTURAS S.A.S,1200000,SERVICIO_INGENIERIA\nINTEGRADORA XYZ S.A.S,600000,SERVICIO_INGENIERIA\n'); $('#tplAwards').href='data:text/csv;charset=utf-8,'+encodeURIComponent('Ingepuntos,Descripción del premio\n50,Parlante Echo Dot de Amazon\n50,Bono redimible sin condiciones por $500.000\n50,Bono para compra de equipos por $700.000 (aplican condiciones)\n'); })();
+(function(){ $('#tplAwards').href='data:text/csv;charset=utf-8,'+encodeURIComponent('Ingepuntos,Descripción del premio\n50,Parlante Echo Dot de Amazon\n50,Bono redimible sin condiciones por $500.000\n50,Bono para compra de equipos por $700.000 (aplican condiciones)\n'); })();
 
 // Reglas
 setupReglas();
