@@ -193,7 +193,11 @@
 
 <script>
 // ===== Estado
-var state={ clientes:[], ventas:[], facturas:[], redenciones:[], premios:[], reglas:{ equipos:{umbral:1000000,puntos:1}, servicios:{umbral:500000,puntos:3} } };
+var state={ clientes:[], ventas:[], facturas:[], redenciones:[], premios:[], 
+           reglas: { equipos:   { puntos: 1, umbral: 1000000, tipo: 'EQUIPO' },
+                     servicios: { puntos: 3, umbral: 500000,  tipo: 'SERVICIO_INGENIERIA' }
+                   }
+          };
 
 // ===== Utils
 function $(s,root){return (root||document).querySelector(s)}
@@ -361,8 +365,19 @@ function renderVentas(){
 // ===== Puntos
 function puntosPorVenta(v){var sub=Number(v.importe)||0; var tipo=String(v.tipo||'EQUIPO').toUpperCase(); var R=state.reglas; if(tipo==='SERVICIO_INGENIERIA'){return Math.floor(sub/R.servicios.umbral)*R.servicios.puntos;} return Math.floor(sub/R.equipos.umbral)*R.equipos.puntos}
 function renderPuntos(){ var by={}; state.ventas.forEach(function(v){var k=slug(v.cliente); if(!by[k]) by[k]={suma:0,pts:0,red:0,nombre:v.cliente}; by[k].suma+=Number(v.importe||0); by[k].pts+=puntosPorVenta(v)}); state.redenciones.forEach(function(r){var k=slug(r.cliente); if(!by[k]) by[k]={suma:0,pts:0,red:0,nombre:r.cliente}; by[k].red+=Number(r.puntos||0)}); var tb=$('#tbPuntos'); if(!tb) return; tb.innerHTML=''; var rows=state.clientes.map(function(c){var k=slug(c.razonSocial); var d=by[k]||{suma:0,pts:0,red:0}; return {nombre:c.razonSocial,suma:d.suma,pts:d.pts,red:d.red,disp:Math.max(d.pts-d.red,0)}}).sort(function(a,b){return b.suma-a.suma}); rows.forEach(function(r){var tr=document.createElement('tr'); tr.innerHTML='<td>'+r.nombre+'</td><td class="nowrap">'+money(r.suma)+'</td><td class="nowrap">'+r.pts+'</td><td class="nowrap">'+r.disp+'</td><td class="nowrap">'+r.red+'</td>'; tb.appendChild(tr)})}
-function setupReglas(){ var R=state.reglas; var html='<ul style="margin:6px 0 0 16px">'+ '<li>Equipos: 1 punto por cada <b>$'+R.equipos.umbral.toLocaleString('es-CO')+'</b>.</li>'+ '<li>Servicios de ingeniería: <b>'+R.servicios.puntos+'</b> puntos por cada <b>$'+R.servicios.umbral.toLocaleString('es-CO')+'</b> (si la columna Tipo = SERVICIO_INGENIERIA).</li>'+ '</ul>'; setText('#reglasTxt',html)}
-
+function setupReglas(){
+  var R = state.reglas;
+  var tipoSrv = (R.servicios && R.servicios.tipo) ? R.servicios.tipo : 'SERVICIO_INGENIERIA';
+  var html =
+    '<ul style="margin:6px 0 0 16px">' +
+      '<li>Equipos: ' + R.equipos.puntos + ' punto' + (R.equipos.puntos===1?'':'s') +
+      ' por cada <b>$' + R.equipos.umbral.toLocaleString('es-CO') + '</b>.</li>' +
+      '<li>Servicios de ingeniería: <b>' + R.servicios.puntos + '</b> punto' + (R.servicios.puntos===1?'':'s') +
+      ' por cada <b>$' + R.servicios.umbral.toLocaleString('es-CO') + '</b>' +
+      ' (si la columna Tipo = ' + tipoSrv + ').</li>' +
+    '</ul>';
+  setText('#reglasTxt', html);
+}
 // Ruta relativa al mismo folder del index.html en GitHub Pages
 const CLIENTS_XLSX_PATH = './Base%20de%20datos%20clientes.xlsx';
 const SALES_XLSX_PATH = './Ventas.xlsx';
