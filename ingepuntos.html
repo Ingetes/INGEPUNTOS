@@ -35,8 +35,7 @@
         <div class="muted" style="font-size:13px">Calculamos puntos base (equipos: 1 pt c/ $1.000.000; servicios: 3 pts c/ $500.000).</div>
       </div>
       <div class="right">
-        <button class="btn" data-action="export-clients">⬇️ Exportar clientes</button>
-        <button class="btn" data-action="clear">🗑️ Limpiar todo</button>
+        <button id="openSettings" class="btn">⚙️ Ajustes</button>
       </div>
     </div>
 
@@ -388,6 +387,126 @@ loadSalesFromWorkbookUrl(SALES_XLSX_PATH).catch(e => { showError(e.message||e); 
 loadInvoicedFromWorkbookUrl(INVOICED_XLSX_PATH).catch(e => { showError(e.message||e); });
 loadAwardsFromJSON(API_AWARDS_URL)
 
+// ======== Ajustes / Subidas remotas ========
+const UPLOAD_ENDPOINT = 'https://portal-api-nine.vercel.app/api/upload'; // MISMO endpoint que usas en el portal
+const ADMIN_MODAL_PASS = 'admin'; // misma clave que ya usas
+
+function setStatus(where, type, text){
+  const el = document.getElementById(where);
+  if (!el) return;
+  if (type === 'idle'){ el.classList.remove('status-ok','status-err'); el.innerHTML = text || ''; }
+  if (type === 'loading'){ el.classList.remove('status-ok','status-err'); el.innerHTML = `<span class="spinner" style="width:14px;height:14px;border:2px solid #cbd5e1;border-top-color:#0f172a;border-radius:50%;display:inline-block;animation:spin .8s linear infinite;vertical-align:middle;margin-right:6px"></span>${text||'Subiendo…'}`; }
+  if (type === 'ok'){ el.classList.remove('status-err'); el.classList.add('status-ok'); el.innerHTML = `✅ ${text||'Actualizado (puede tardar ~5 min en verse para todos)'}`; }
+  if (type === 'err'){ el.classList.remove('status-ok'); el.classList.add('status-err'); el.innerHTML = `❌ ${text||'Error al subir'}`; }
+}
+
+async function subirArchivoExcel(inputId, rutaEnRepo, etiqueta, statusId){
+  const inp = document.getElementById(inputId);
+  const f = inp?.files?.[0];
+  if (!f){ setStatus(statusId,'idle',''); return {nombre:null, ok:false, msg:'sin archivo'}; }
+
+  // tamaño máx 25MB
+  if (f.size > 25*1024*1024){ setStatus(statusId,'err','Archivo muy grande (>25MB)'); return {nombre:f.name, ok:false, msg:'grande'}; }
+
+  setStatus(statusId,'loading','Subiendo…');
+  // a base64
+  const buf = await f.arrayBuffer();
+  let bin=''; const bytes=new Uint8Array(buf); for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
+  const base64 = btoa(bin);
+
+  let resp, j;
+  try{
+    resp = await fetch(UPLOAD_ENDPOINT, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        adminKey: document.getElementById('admPass').value,
+        fileBase64: base64,
+        path: rutaEnRepo, // nombre exacto en el repo
+        message: `Actualiza ${etiqueta} desde Ingepuntos`
+      })
+    });
+    try{ j = await resp.json(); }catch{ j = {}; }
+  }catch(e){
+    setStatus(statusId,'err','Fallo de red'); return {nombre:f.name, ok:false, msg:'net'};
+  }
+
+  if (!resp.ok || !j?.ok){
+    setStatus(statusId,'err', j?.msg || `HTTP ${resp.status}`); return {nombre:f.name, ok:false, msg:j?.msg || `HTTP ${resp.status}`};
+  }
+
+  setStatus(statusId,'ok','Subido. Espera ~5 min para que se refleje.');
+  return {nombre:f.name, ok:true, msg:'OK'};
+}
+
+// Modal: abrir/cerrar/login
+(function(){
+  const modal = document.getElementById('settingsModal');
+  const openBtn = document.getElementById('openSettings');
+  const closeBtn = document.getElementById('closeSettings');
+  const loginView = document.getElementById('settingsLogin');
+  const contentView = document.getElementById('settingsContent');
+  const btnLogin = document.getElementById('btnLogin');
+  const btnSave = document.getElementById('btnSaveDocs');
+  const btnLogout = document.getElementById('btnLogout');
+
+  let logged = false;
+  function openModal(){
+    modal.style.display='flex'; modal.setAttribute('aria-hidden','false');
+    loginView.classList.toggle('hidden', logged);
+    contentView.classList.toggle('hidden', !logged);
+    btnSave.classList.toggle('hidden', !logged);
+    btnLogout.classList.toggle('hidden', !logged);
+  }
+  function closeModal(){
+    modal.style.display='none'; modal.setAttribute('aria-hidden','true');
+    // limpiar inputs
+    ['fileClientes','fileVentas','fileCompras'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+    ['statusClientes','statusVentas','statusCompras'].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent=''; });
+  }
+
+  openBtn?.addEventListener('click', openModal);
+  closeBtn?.addEventListener('click', closeModal);
+  modal?.addEventListener('click', (e)=>{ if(e.target===modal) closeModal(); });
+
+  btnLogin?.addEventListener('click', ()=>{
+    const ok = (document.getElementById('admPass').value.trim() === ADMIN_MODAL_PASS);
+    if(!ok) return alert('Clave incorrecta');
+    logged = true;
+    loginView.classList.add('hidden'); contentView.classList.remove('hidden');
+    btnSave.classList.remove('hidden'); btnLogout.classList.remove('hidden');
+  });
+
+  btnLogout?.addEventListener('click', ()=>{
+    logged=false; document.getElementById('admPass').value='';
+    contentView.classList.add('hidden'); btnSave.classList.add('hidden'); btnLogout.classList.add('hidden');
+    loginView.classList.remove('hidden');
+  });
+
+  // Guardar (sube 3 archivos al repo compartido)
+  btnSave?.addEventListener('click', async ()=>{
+    const res = [];
+    res.push(await subirArchivoExcel('fileClientes','Base de datos clientes.xlsx','Base de datos de clientes','statusClientes'));
+    res.push(await subirArchivoExcel('fileVentas','Ventas.xlsx','Ventas','statusVentas'));
+    res.push(await subirArchivoExcel('fileCompras','Compras_Facturado_Resumen.xlsx','Compras facturado','statusCompras'));
+
+    const seleccionados = res.filter(x=>x.nombre);
+    if (!seleccionados.length) return alert('No se seleccionaron archivos.');
+
+    const detalle = seleccionados.map(r=>`${r.nombre} → ${r.ok ? 'OK -> Espera ~5 min' : 'ERROR ('+r.msg+')'}`).join('\n');
+    alert(detalle);
+
+    // Romper caché y recargar datos si hubo al menos 1 OK
+    if (res.some(x=>x.ok)){
+      const v='?v='+Date.now();
+      // volver a cargar bases con cache-busting y refrescar pantallas
+      loadClientsFromWorkbookUrl(CLIENTS_XLSX_PATH + v).catch(e=>showError(e.message||e));
+      loadSalesFromWorkbookUrl(SALES_XLSX_PATH + v).catch(e=>showError(e.message||e));
+      loadInvoicedFromWorkbookUrl(INVOICED_XLSX_PATH + v).catch(e=>showError(e.message||e));
+    }
+  });
+})();
+
 // ===== Catálogo de premios
 function normHeader(h){
   var s=String(h==null?'':h);
@@ -570,5 +689,54 @@ renderClientes(); renderVentas(); renderPuntos(); renderAwards(); renderHist();
 // Captura errores no atrapados
 window.addEventListener('error', function(e){ showError(e.message||'Error de script'); });
 </script>
+<!-- ===== MODAL AJUSTES ===== -->
+<div id="settingsModal" class="modal-backdrop" aria-hidden="true" style="position:fixed; inset:0; background:rgba(2,6,23,.45); display:none; align-items:center; justify-content:center; padding:16px; z-index:50;">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" style="background:#fff; border:1px solid #e2e8f0; border-radius:16px; box-shadow:0 10px 30px rgba(2,6,23,.08); width:min(600px,96vw); max-height:85vh; display:flex; flex-direction:column;">
+    <div class="modal-header" style="display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #e2e8f0; padding:14px 16px;">
+      <h3 id="settingsTitle" style="margin:0">Ajustes</h3>
+      <button id="closeSettings" class="btn btn-small">✕</button>
+    </div>
+
+    <div class="modal-body" style="padding:16px; overflow:auto; -webkit-overflow-scrolling:touch; flex:1 1 auto;">
+      <!-- Login -->
+      <div id="settingsLogin">
+        <p class="muted">Ingresa la clave de administrador para continuar.</p>
+        <div class="row" style="align-items:flex-end">
+          <label>Clave admin<br><input id="admPass" type="password" class="input" placeholder="••••" style="min-width:200px"></label>
+          <button id="btnLogin" class="btn">Ingresar</button>
+        </div>
+      </div>
+
+      <!-- Contenido -->
+      <div id="settingsContent" class="hidden">
+        <p class="muted">Actualiza los archivos maestros (.xlsx).</p>
+        <div class="stack">
+          <label>Base de datos de clientes (Excel)<br>
+            <small class="muted">Nombre requerido: <b>Base de datos clientes.xlsx</b></small>
+            <input id="fileClientes" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="input">
+          </label>
+          <div id="statusClientes" class="status-line muted"></div>
+
+          <label>Ventas (Excel)<br>
+            <small class="muted">Nombre requerido: <b>Ventas.xlsx</b></small>
+            <input id="fileVentas" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="input">
+          </label>
+          <div id="statusVentas" class="status-line muted"></div>
+
+          <label>Compras Facturado Resumen (Excel)<br>
+            <small class="muted">Nombre requerido: <b>Compras_Facturado_Resumen.xlsx</b></small>
+            <input id="fileCompras" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="input">
+          </label>
+          <div id="statusCompras" class="status-line muted"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer" style="display:flex; gap:10px; justify-content:flex-end; border-top:1px solid #e2e8f0; padding:12px 16px;">
+      <button id="btnSaveDocs" class="btn hidden">Guardar cambios</button>
+      <button id="btnLogout" class="btn btn-small hidden">Cerrar sesión</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
