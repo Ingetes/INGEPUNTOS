@@ -388,7 +388,7 @@ loadInvoicedFromWorkbookUrl(INVOICED_XLSX_PATH).catch(e => { showError(e.message
 loadAwardsFromJSON(API_AWARDS_URL)
 
 // ======== Ajustes / Subidas remotas ========
-const UPLOAD_ENDPOINT = 'https://portal-api-nine.vercel.app/api/upload'; // MISMO endpoint que usas en el portal
+const UPLOAD_ENDPOINT = 'https://portal-api-nine.vercel.app/api/upload?repo=ingepuntos';
 const ADMIN_MODAL_PASS = 'admin'; // misma clave que ya usas
 
 function setStatus(where, type, text){
