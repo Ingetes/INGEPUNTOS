@@ -23,7 +23,6 @@
     .tabs{display:flex;gap:8px;margin:10px 0 14px;flex-wrap:wrap}
     .tab{padding:8px 12px;border:1px solid var(--border);border-radius:10px;background:#fff;cursor:pointer}
     .tab.active{background:#111827;color:#fff;border-color:#111827}
-    textarea.paste{width:100%;height:160px;border:1px dashed var(--border);border-radius:10px;padding:8px}
     #debug{margin-top:10px;color:#b91c1c}
   </style>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -53,17 +52,12 @@
     <!-- CLIENTES -->
     <section id="tab-clientes">
       <div class="card" style="margin-bottom:12px">
-        <h3 style="margin-top:0">Cargar clientes (XLSX/CSV) o pegar desde Excel</h3>
+        <h3 style="margin-top:0">Cargar clientes (XLSX/CSV)</h3>
         <div class="muted">Cabecera: <code>Nombre de la cuenta</code> (en cualquier fila).</div>
         <div class="row" style="margin:10px 0">
           <input id="fileClients" type="file" accept=".xlsx,.xls,.csv" />
-          <button class="btn primary" data-action="proc-clients">Procesar CSV</button>
+          <button class="btn primary" data-action="proc-clients">Procesar clientes</button>
           <a id="tplClients" class="btn" download="maestro-clientes-ejemplo.csv">Plantilla CSV</a>
-        </div>
-        <div class="muted" style="margin:6px 0 4px">O pega desde Excel/Sheets (Ctrl+V):</div>
-        <textarea id="pasteClients" class="paste" placeholder="Incluye la fila con 'Nombre de la cuenta'"></textarea>
-        <div class="row" style="margin:6px 0 0">
-          <button class="btn" data-action="proc-paste">Procesar pegado</button>
         </div>
         <div id="resClients" class="muted" style="margin-top:8px">—</div>
       </div>
@@ -370,16 +364,6 @@ var actions = {
       setText('#resClients','OK: '+ok);
       renderClientes(); renderVentas(); renderPuntos();
     }).catch(function(e){showError(e.message||e)});
-  },
-
-  'proc-paste': function(){
-    var t = (($('#pasteClients')||{value:''}).value||'');
-    if(!t.trim()) return alert('Pega primero la tabla');
-    var r = parseClientsText(t.replace(/\t/g,','));
-    if(!r.ok) return setText('#resClients',r.reason);
-    var ok = upsertClientes(r.rows);
-    setText('#resClients','OK: '+ok);
-    renderClientes(); renderVentas(); renderPuntos();
   },
 
   'buscar-clientes': function(){
