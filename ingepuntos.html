@@ -360,65 +360,142 @@ function renderHist(){ var tb=$('#tbHist'); if(!tb) return; tb.innerHTML=''; (st
 
 // ===== Handlers
 function parseInvoicedText(text){ var rows=splitCSV(text), hdr=null, idx=0; for(var i=0;i<Math.min(60,rows.length);i++){ var upp=(rows[i]||[]).map(slug); var hasName=(upp.indexOf('NOMBRE DE LA CUENTA')>=0||upp.indexOf('RAZONSOCIAL')>=0||upp.indexOf('NOMBRE TERCERO')>=0||upp.indexOf('NOMBRE_TERCERO')>=0||upp.indexOf('CLIENTE')>=0); var hasAmt=(upp.indexOf('FACTURADO')>=0||upp.indexOf('VALOR BRUTO')>=0||upp.indexOf('VALOR_BRUTO')>=0||upp.indexOf('IMPORTE')>=0||upp.indexOf('TOTAL')>=0||upp.indexOf('SUBTOTAL')>=0); if(hasName&&hasAmt){ hdr=rows[i]; idx=i; break; } } if(!hdr) return {ok:false,reason:'Se requiere columna de cliente y monto (Facturado/Valor Bruto/Importe/Total/Subtotal).'}; var H=headIndex(hdr); var iName= H['RAZONSOCIAL']!=null?H['RAZONSOCIAL']:(H['NOMBRE TERCERO']!=null?H['NOMBRE TERCERO']:(H['NOMBRE_TERCERO']!=null?H['NOMBRE_TERCERO']:(H['CLIENTE']!=null?H['CLIENTE']:H['NOMBRE DE LA CUENTA']))); var iAmt = H['FACTURADO']!=null?H['FACTURADO']:(H['VALOR BRUTO']!=null?H['VALOR BRUTO']:(H['VALOR_BRUTO']!=null?H['VALOR_BRUTO']:(H['IMPORTE']!=null?H['IMPORTE']:(H['TOTAL']!=null?H['TOTAL']:H['SUBTOTAL'])))); var body=rows.slice(idx+1); var out=body.filter(function(r){return r&&r.some(function(c){return String(c).trim()!==''})}).map(function(r){ return { nombre:r[iName], importe:parseMoney(r[iAmt]) }; }); return {ok:true, rows:out}; }
-var actions={
+var actions = {
   'proc-clients': function(){
-  var f = $('#fileClients').files[0];
-  if(!f) return alert('Selecciona el XLSX/CSV de clientes');
-  fileToCSV(f).then(parseClientsText).then(function(r){
+    var f = $('#fileClients').files[0];
+    if(!f) return alert('Selecciona el XLSX/CSV de clientes');
+    fileToCSV(f).then(parseClientsText).then(function(r){
+      if(!r.ok) return setText('#resClients',r.reason);
+      var ok=upsertClientes(r.rows);
+      setText('#resClients','OK: '+ok);
+      renderClientes(); renderVentas(); renderPuntos();
+    }).catch(function(e){showError(e.message||e)});
+  },
+
+  'proc-paste': function(){
+    var t = (($('#pasteClients')||{value:''}).value||'');
+    if(!t.trim()) return alert('Pega primero la tabla');
+    var r = parseClientsText(t.replace(/\t/g,','));
     if(!r.ok) return setText('#resClients',r.reason);
-    var ok=upsertClientes(r.rows);
+    var ok = upsertClientes(r.rows);
     setText('#resClients','OK: '+ok);
     renderClientes(); renderVentas(); renderPuntos();
-  }).catch(function(e){showError(e.message||e)});
-}
-  'proc-paste': function(){ var t=($('#pasteClients')||{value:''}).value; if(!t.trim()) return alert('Pega primero la tabla'); var r=parseClientsText(t.replace(/\t/g,',')); if(!r.ok) return setText('#resClients',r.reason); var ok=upsertClientes(r.rows); setText('#resClients','OK: '+ok); renderClientes(); renderVentas(); renderPuntos(); },
-  'buscar-clientes': function(){ renderClientes(); },
+  },
+
+  'buscar-clientes': function(){
+    renderClientes();
+  },
+
   'proc-sales': function(){
-  var f = $('#fileSales').files[0];
-  if(!f) return alert('Selecciona el XLSX/CSV de ventas');
-  fileToCSV(f).then(parseSalesText).then(function(r){
-    if(!r.ok) return setText('#resSales',r.reason);
-    var ok=0; r.rows.forEach(function(row){ addVenta(row); ok++; });
-    setText('#resSales','Ventas cargadas: '+ok);
-    renderVentas(); renderPuntos(); renderHist();
-  }).catch(function(e){showError(e.message||e)});
-}
+    var f = $('#fileSales').files[0];
+    if(!f) return alert('Selecciona el XLSX/CSV de ventas');
+    fileToCSV(f).then(parseSalesText).then(function(r){
+      if(!r.ok) return setText('#resSales',r.reason);
+      var ok=0; r.rows.forEach(function(row){ addVenta(row); ok++; });
+      setText('#resSales','Ventas cargadas: '+ok);
+      renderVentas(); renderPuntos(); renderHist();
+    }).catch(function(e){showError(e.message||e)});
+  },
+
   'proc-invoiced': function(){
-  var f = $('#fileInvoiced').files[0];
-  if(!f) return alert('Selecciona el XLSX/CSV de Compras facturado');
-  fileToCSV(f).then(parseInvoicedText).then(function(r){
-    if(!r.ok) return setText('#resSales',r.reason);
-    var ok=0;
-    r.rows.forEach(function(row){
-      var n=String(row.nombre||'').trim(); if(!n) return;
-      state.facturas.push({cliente:n, importe:Number(row.importe)||0}); ok++;
-    });
-    setText('#resSales','Compras facturado cargadas: '+ok);
-    renderVentas(); renderPuntos();
-  }).catch(function(e){showError(e.message||e)});
-}
-  'export-clients': function(){ var csv='Nombre de la cuenta\n'+state.clientes.map(function(c){return '"'+c.razonSocial.replace(/"/g,'""')+'"'}).join('\n'); var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='clientes-ingepuntos.csv'; a.click(); },
-  'clear': function(){ if(!confirm('¿Borrar clientes, ventas, facturas, premios y redenciones?')) return; state.clientes=[]; state.ventas=[]; state.facturas=[]; state.premios=[]; state.redenciones=[]; renderClientes(); renderVentas(); renderPuntos(); renderAwards(); renderHist(); setText('#resClients','—'); setText('#resSales','—'); setText('#resAwards','—'); setText('#kpiDisp','0'); setText('#simAwards','—'); },
+    var f = $('#fileInvoiced').files[0];
+    if(!f) return alert('Selecciona el XLSX/CSV de Compras facturado');
+    fileToCSV(f).then(parseInvoicedText).then(function(r){
+      if(!r.ok) return setText('#resSales',r.reason);
+      var ok=0;
+      r.rows.forEach(function(row){
+        var n=String(row.nombre||'').trim(); if(!n) return;
+        state.facturas.push({cliente:n, importe:Number(row.importe)||0}); ok++;
+      });
+      setText('#resSales','Compras facturado cargadas: '+ok);
+      renderVentas(); renderPuntos();
+    }).catch(function(e){showError(e.message||e)});
+  },
+
+  'export-clients': function(){
+    var csv='Nombre de la cuenta\n'+state.clientes
+      .map(function(c){return '"'+c.razonSocial.replace(/"/g,'""')+'"'}).join('\n');
+    var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='clientes-ingepuntos.csv';
+    a.click();
+  },
+
+  'clear': function(){
+    if(!confirm('¿Borrar clientes, ventas, facturas, premios y redenciones?')) return;
+    state.clientes=[]; state.ventas=[]; state.facturas=[];
+    state.premios=[]; state.redenciones=[];
+    renderClientes(); renderVentas(); renderPuntos(); renderAwards(); renderHist();
+    setText('#resClients','—'); setText('#resSales','—'); setText('#resAwards','—');
+    setText('#kpiDisp','0'); setText('#simAwards','—');
+  },
+
   'proc-awards': function(){
-  var f=$('#fileAwards').files[0];
-  if(!f) return alert('Selecciona el CSV del catálogo');
-  f.text().then(parseAwardsText)...
-}
-  'proc-awards': function(){
-  var f = $('#fileAwards').files[0];
-  if(!f) return alert('Selecciona el XLSX/CSV del catálogo');
-  fileToCSV(f).then(parseAwardsText).then(function(r){
-    if(!r.ok) return setText('#resAwards',r.reason);
-    state.premios = r.rows.filter(function(p){return p.umbral>0 && p.desc});
-    setText('#resAwards','Premios cargados: '+state.premios.length);
-    renderAwards();
-  }).catch(function(e){showError(e.message||e)});
-}
-  'add-award': function(){ var pts=Number(($('#newAwardPts')||{value:'0'}).value)||0; var desc=(($('#newAwardDesc')||{value:''}).value||'').trim(); if(pts<=0||!desc) return alert('Completa Ingepuntos y Descripción'); state.premios.push({umbral:pts,desc:desc}); $('#newAwardPts').value=''; $('#newAwardDesc').value=''; renderAwards(); setText('#resAwards','Premios: '+state.premios.length) },
-  'del-award': function(el){ var idx=Number(el.getAttribute('data-idx')); state.premios.splice(idx,1); renderAwards(); setText('#resAwards','Premios: '+state.premios.length) },
-  'export-awards': function(){ var csv='Ingepuntos,Descripción del premio\n'+(state.premios||[]).map(function(p){return '"'+p.umbral+'","'+p.desc.replace(/"/g,'""')+'"'}).join('\n'); var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='catalogo-premios.csv'; a.click(); },
-  'simulate': function(){ var nombre=(($('#inpRedeemClient')||{value:''}).value||'').trim(); var req=Number((($('#inpRedeemPts')||{value:'0'}).value)||0)||0; var disp=nombre?puntosDisponibles(nombre):0; setText('#kpiDisp',disp); var usable=(req>0?Math.min(req,disp):disp); var list=state.premios||[]; var base='<div class="muted">Puntos disponibles: <b>'+disp+'</b></div>'; if(!list.length){ return setText('#simAwards', base+'\nAún no hay premios configurados.'); } var opts=list.filter(function(p){return p.umbral<=usable}).sort(function(a,b){return a.umbral-b.umbral}); if(!opts.length){ return setText('#simAwards', base+'\nNo hay premios con los puntos indicados.'); } var html=base+'<div style="overflow:auto;margin-top:8px"><table><thead><tr><th>Ingepuntos</th><th>Descripción</th><th></th></tr></thead><tbody>'+opts.map(function(p,i){return '<tr><td>'+p.umbral+'</td><td>'+p.desc+'</td><td><button class="btn" data-action="redeem" data-pts="'+p.umbral+'" data-desc="'+p.desc.replace(/"/g,'&quot;')+'">Registrar redención</button></td></tr>'}).join('')+'</tbody></table></div>'; $('#simAwards').innerHTML=html; },
-  'redeem': function(el){ var nombre=(($('#inpRedeemClient')||{value:''}).value||'').trim(); var pts=Number(el.getAttribute('data-pts'))||0; var desc=el.getAttribute('data-desc')||''; if(!nombre) return alert('Ingresa el nombre del cliente'); var disp=puntosDisponibles(nombre); if(pts>disp) return alert('Puntos insuficientes. Disponibles: '+disp); state.redenciones.push({cliente:nombre,puntos:pts,premio:desc,fecha:new Date().toISOString()}); alert('Redención registrada'); renderPuntos(); renderHist(); actions['simulate'](); }
+    var f = $('#fileAwards').files[0];
+    if(!f) return alert('Selecciona el XLSX/CSV del catálogo');
+    fileToCSV(f).then(parseAwardsText).then(function(r){
+      if(!r.ok) return setText('#resAwards',r.reason);
+      state.premios = r.rows.filter(function(p){return p.umbral>0 && p.desc});
+      setText('#resAwards','Premios cargados: '+state.premios.length);
+      renderAwards();
+    }).catch(function(e){showError(e.message||e)});
+  },
+
+  'add-award': function(){
+    var pts=Number((($('#newAwardPts')||{value:'0'}).value)||0)||0;
+    var desc=(($('#newAwardDesc')||{value:''}).value||'').trim();
+    if(pts<=0||!desc) return alert('Completa Ingepuntos y Descripción');
+    state.premios.push({umbral:pts,desc:desc});
+    $('#newAwardPts').value=''; $('#newAwardDesc').value='';
+    renderAwards(); setText('#resAwards','Premios: '+state.premios.length);
+  },
+
+  'del-award': function(el){
+    var idx=Number(el.getAttribute('data-idx'));
+    state.premios.splice(idx,1);
+    renderAwards(); setText('#resAwards','Premios: '+state.premios.length);
+  },
+
+  'export-awards': function(){
+    var csv='Ingepuntos,Descripción del premio\n'+(state.premios||[])
+      .map(function(p){return '"'+p.umbral+'","'+p.desc.replace(/"/g,'""')+'"'}).join('\n');
+    var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='catalogo-premios.csv';
+    a.click();
+  },
+
+  'simulate': function(){
+    var nombre=(($('#inpRedeemClient')||{value:''}).value||'').trim();
+    var req=Number((($('#inpRedeemPts')||{value:'0'}).value)||0)||0;
+    var disp=nombre?puntosDisponibles(nombre):0;
+    setText('#kpiDisp',disp);
+    var usable=(req>0?Math.min(req,disp):disp);
+    var list=state.premios||[];
+    var base='<div class="muted">Puntos disponibles: <b>'+disp+'</b></div>';
+    if(!list.length){ return setText('#simAwards', base+'\nAún no hay premios configurados.'); }
+    var opts=list.filter(function(p){return p.umbral<=usable}).sort(function(a,b){return a.umbral-b.umbral});
+    if(!opts.length){ return setText('#simAwards', base+'\nNo hay premios con los puntos indicados.'); }
+    var html=base+'<div style="overflow:auto;margin-top:8px"><table><thead><tr><th>Ingepuntos</th><th>Descripción</th><th></th></tr></thead><tbody>'+
+      opts.map(function(p,i){
+        return '<tr><td>'+p.umbral+'</td><td>'+p.desc+'</td><td><button class="btn" data-action="redeem" data-pts="'+p.umbral+'" data-desc="'+p.desc.replace(/"/g,'&quot;')+'">Registrar redención</button></td></tr>';
+      }).join('')+'</tbody></table></div>';
+    $('#simAwards').innerHTML=html;
+  },
+
+  'redeem': function(el){
+    var nombre=(($('#inpRedeemClient')||{value:''}).value||'').trim();
+    var pts=Number(el.getAttribute('data-pts'))||0;
+    var desc=el.getAttribute('data-desc')||'';
+    if(!nombre) return alert('Ingresa el nombre del cliente');
+    var disp=puntosDisponibles(nombre);
+    if(pts>disp) return alert('Puntos insuficientes. Disponibles: '+disp);
+    state.redenciones.push({cliente:nombre,puntos:pts,premio:desc,fecha:new Date().toISOString()});
+    alert('Redención registrada');
+    renderPuntos(); renderHist(); actions['simulate']();
+  }
 };
 
 // Delegación global de clicks
