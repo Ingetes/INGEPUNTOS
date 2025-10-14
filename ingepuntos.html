@@ -386,7 +386,7 @@ const ADMIN_KEY_AW   = 'admin';
 loadClientsFromWorkbookUrl(CLIENTS_XLSX_PATH).catch(function(e){showError(e.message || e);});
 loadSalesFromWorkbookUrl(SALES_XLSX_PATH).catch(e => { showError(e.message||e); });
 loadInvoicedFromWorkbookUrl(INVOICED_XLSX_PATH).catch(e => { showError(e.message||e); });
-loadAwardsFromJSON(API_AWARDS_URL).then(()=>{ tryLoadAwardsLocalOverlay(); });
+loadAwardsFromJSON(API_AWARDS_URL)
 
 // ===== Catálogo de premios
 function normHeader(h){
@@ -459,33 +459,11 @@ async function saveAwardsRemote(){
   }
 }
 
-// MODO 2 (fallback): localStorage (no comparte con otros usuarios)
-function saveAwardsLocal(){
-  try{
-    localStorage.setItem('ingepuntos.premios', JSON.stringify(state.premios));
-    setText('#resAwards','Premios: '+state.premios.length+' (guardado local)');
-  }catch(_){}
-}
-
-// Intento de guardado: primero remoto, si falla, local
 async function persistAwards(){
   const ok = await saveAwardsRemote();
-  if(!ok) saveAwardsLocal();
-}
-
-// Carga local como overlay (por si hay cambios previos locales)
-function tryLoadAwardsLocalOverlay(){
-  try{
-    const s = localStorage.getItem('ingepuntos.premios');
-    if(!s) return;
-    const arr = JSON.parse(s);
-    const loc = normalizeAwards(arr);
-    if (loc.length){
-      state.premios = loc;
-      setText('#resAwards','Premios cargados: '+state.premios.length+' (local)');
-      renderAwards();
-    }
-  }catch(_){}
+  if(!ok){
+    setText('#resAwards','❌ No se pudo guardar en el servidor.');
+  }
 }
 
 // ===== Redención & histórico
