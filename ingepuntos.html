@@ -223,7 +223,7 @@ const STOP_TOKENS = new Set([
   "INGENIERIA","INGENIERO","INGENIEROS","AUTOMATIZACION","SOLUCION","SOLUCIONES",
   "ELECTRICO","ELECTRICA","ELECTRICOS","ELECTRICAS","ELECTROINDUSTRIAL","INDUSTRIAL","INDUSTRIALES","INDUSTRY",
   "SERVICIO","SERVICIOS","SISTEMA","SISTEMAS","TECNOLOGIA","TECNOLOGIAS","TECNICA","TECNICAS",
-  "MATERIAL","MATERIALES","ORIENTALES","ORIENTAL","GRUPO","HOLDING"
+  "MATERIAL","MATERIALES","ORIENTALES","ORIENTAL","GRUPO","HOLDING","LIMITADA"   
 ]);
 
 function tokensUtiles(s){
@@ -256,10 +256,19 @@ function fingerprint(s){
   return toks.join("+"); // p.ej. "AGP+COLOMBIA" o "TOOL+SUPPLY"
 }
 
-// 4) similitud Jaccard entre conjuntos de tokens (0..1)
-function jaccard(a, b){
-  const A = new Set(tokensUtiles(a));
-  const B = new Set(tokensUtiles(b));
+// 4) similitud robusta: Jaccard + “contenimiento” de siglas (1 solo token)
+function tokenSet(s){ return new Set(tokensUtiles(s)); }
+
+function simScore(a, b){
+  const A = tokenSet(a);
+  const B = tokenSet(b);
+  if (A.size === 0 || B.size === 0) return 0;
+
+  // Si un lado es sólo una sigla/pegado y ese token está en el otro → match fuerte
+  if (A.size === 1){ const t = [...A][0]; if (B.has(t)) return 0.95; }
+  if (B.size === 1){ const t = [...B][0]; if (A.has(t)) return 0.95; }
+
+  // Jaccard clásico
   let inter = 0;
   A.forEach(t => { if (B.has(t)) inter++; });
   const uni = A.size + B.size - inter || 1;
@@ -282,7 +291,7 @@ function canonKey(nombre){
   for (const key of CANON.keys()){
     const toksKey = key.split("+").filter(Boolean);
     if (Math.abs(toksKey.length - toksNew.length) > MAX_LEN_DIFF) continue; // filtro rápido
-    const score = jaccard(nombre, CANON.get(key) || key);
+    const score = simScore(nombre, CANON.get(key) || key);
     if (score > bestScore) { bestScore = score; bestKey = key; }
   }
 
