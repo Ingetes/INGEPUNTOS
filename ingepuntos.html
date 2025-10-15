@@ -198,129 +198,70 @@ var state={ clientes:[], ventas:[], facturas:[], redenciones:[], premios:[],
 function $(s,root){return (root||document).querySelector(s)}
 function $all(s,root){return Array.from((root||document).querySelectorAll(s))}
 function slug(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim()}
-// ====== Normalización automática sin listas manuales ======
-
-// 1) normaliza base (acentos, mayúsculas, S.A.S -> SAS, sin puntuación)
-function baseName(s){
-  let x = String(s||"")
-    .normalize("NFD").replace(/[\u0300-\u036f]/g,"") // sin acentos
+// Normaliza nombres de empresa para emparejar: quita acentos, puntuación,
+// colapsa "S A S" -> "SAS" y remueve sufijos legales comunes.
+// Clave robusta para cruzar clientes entre archivos con nombres distintos
+function nameKey(s){
+  let x = String(s || "")
+    // quita acentos
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    // mayúsculas
     .toUpperCase();
-  x = x.replace(/\bS[\s\.]*A[\s\.]*S\b/g, "SAS"); // S.A.S / S A S -> SAS
-  x = x.replace(/\bS[\s\.]*A\b/g, "SA");         // S.A / S A   -> SA
-  x = x.replace(/[^\w\s]/g," ");                 // sin puntuación (&,/,-,.)
-  x = x.replace(/\s+/g," ").trim();
+
+  // normaliza variantes separadas por espacios o puntos
+  // "S.A.S" -> "SAS", "S A S" -> "SAS", "S.A" -> "SA"
+  x = x.replace(/\bS[\s\.]*A[\s\.]*S\b/g, "SAS");
+  x = x.replace(/\bS[\s\.]*A\b/g, "SA");
+
+  // quita toda puntuación (deja letras/números/espacios)
+  x = x.replace(/[^\w\s]/g, " ");
+
+  // elimina sufijos legales y variantes comunes (en cualquier posición)
+  // (los quitamos globalmente porque muchos vienen duplicados o en medio)
+  const SUFIJOS = [
+    // formas cortas
+    "SAS","SA","LTDA","LTD","BIC",
+    // expresiones frecuentes
+    "SOCIEDAD POR ACCIONES SIMPLIFICADA",
+    "COMPA(?:N|Ñ)IA","COMPANIA","CIA","CIA LTDA",
+    "S EN C","SEN C","SENC"
+  ];
+  x = x.replace(new RegExp(`\\b(?:${SUFIJOS.join("|")})\\b`, "g"), " ");
+
+  // colapsa espacios
+  x = x.replace(/\s+/g, " ").trim();
+
   return x;
 }
+// Clave de emparejamiento más fuerte para cruzar clientes entre archivos
+function matchKey(s){
+  // nameKey ya quita acentos, mayúsculas y sufijos legales comunes
+  let x = nameKey(s).replace(/&/g, ' Y ');
 
-// 2) tokens útiles (quita stopwords corporativas, artículos, etc.)
-const STOP_TOKENS = new Set([
-  // artículos / preps
-  "DE","DEL","LA","EL","LOS","LAS","Y","E","EN","POR","PARA","THE","AND",
-  // legales y genéricos
-  "SAS","SA","LTDA","LTD","BIC","CIA","COMPANIA","COMPANIA","SOCIEDAD",
-  "POR","ACCIONES","SIMPLIFICADA","SENC","S","EN","C",
-  // palabras corporativas muy comunes (no definen marca)
-  "INGENIERIA","INGENIERO","INGENIEROS","AUTOMATIZACION","SOLUCION","SOLUCIONES",
-  "ELECTRICO","ELECTRICA","ELECTRICOS","ELECTRICAS","ELECTROINDUSTRIAL","INDUSTRIAL","INDUSTRIALES","INDUSTRY",
-  "SERVICIO","SERVICIOS","SISTEMA","SISTEMAS","TECNOLOGIA","TECNOLOGIAS","TECNICA","TECNICAS",
-  "MATERIAL","MATERIALES","ORIENTALES","ORIENTAL","GRUPO","HOLDING","LIMITADA"   
-]);
+  // tokens y stopwords corporativas / genéricas
+  const STOP = new Set([
+    // artículos / preps
+    'DE','DEL','LA','EL','LOS','LAS','Y','EN','POR','PARA','THE','AND',
+    // corporativas genéricas
+    'INGENIERIA','INGENIERO','INGENIEROS',
+    'AUTOMATIZACION','AUTOMATIZACIONES',
+    'ELECTRICO','ELECTRICA','ELECTRICOS','ELECTRICAS','ELECTROINDUSTRIAL','INDUSTRIAL','INDUSTRIALES',
+    'SERVICIOS','SISTEMAS','TECNOLOGIA','TECNOLOGIAS','TECNICA','TECNICAS',
+    // ya las limpia nameKey, pero por si quedaron
+    'SAS','SA','LTDA','LTD','LIMITADA','BIC','CIA','COMPANIA','COMPANIA',
+    // letras sueltas y comodines que “ensucian”
+    'C','G','P'
+  ]);
 
-function tokensUtiles(s){
-  const words = baseName(s).split(/\s+/).filter(Boolean);
+  let tokens = x.split(/\s+/).filter(Boolean)
+    // quita stopwords
+    .filter(t => !STOP.has(t) && t.length > 1)
+    // singular muy básico (quitar S final cuando aplica)
+    .map(t => t.endsWith('S') ? t.slice(0, -1) : t);
 
-  // 1) tokens núcleo (quitando stopwords y singularizando plurales largos)
-  let toks = words
-    .filter(w => !STOP_TOKENS.has(w) && w.length >= 2)
-    .map(w => (w.length > 4 && w.endsWith('S')) ? w.slice(0, -1) : w);
-
-  // 2) token de iniciales (CAMILO MORENOS -> "CM"; INGENIERIA ... IMSO -> "IMSO")
-  const initials = words
-    .filter(w => !STOP_TOKENS.has(w) && w.length >= 1)
-    .map(w => w[0])
-    .join('');
-  if (initials.length >= 2) toks.push(initials);
-
-  // 3) token “fusionado” (METAL + ARANGO -> "METALARANGO"), útil para casos pegados
-  if (toks.length >= 2) toks.push(toks.join(''));
-
-  // 4) únicos y ordenados (estabilidad)
-  toks = [...new Set(toks)].sort();
-
-  return toks;
+  // une: METAL ARANGOS -> METALARANGO, C & G -> (se van las letras sueltas)
+  return tokens.join('');
 }
-
-// 3) "huella" (fingerprint) por tokens: ordenados y únicos
-function fingerprint(s){
-  const toks = [...new Set(tokensUtiles(s))].sort();
-  return toks.join("+"); // p.ej. "AGP+COLOMBIA" o "TOOL+SUPPLY"
-}
-
-// 4) similitud robusta: Jaccard + “contenimiento” de siglas (1 solo token)
-function tokenSet(s){ return new Set(tokensUtiles(s)); }
-
-function simScore(a, b){
-  const A = tokenSet(a);
-  const B = tokenSet(b);
-  if (A.size === 0 || B.size === 0) return 0;
-
-  // Si un lado es solo una sigla/pegado y ese token está en el otro → match fuerte
-  if (A.size === 1){ const t = [...A][0]; if (B.has(t)) return 0.95; }
-  if (B.size === 1){ const t = [...B][0]; if (A.has(t)) return 0.95; }
-
-  // Jaccard clásico
-  let inter = 0;
-  A.forEach(t => { if (B.has(t)) inter++; });
-  const uni = A.size + B.size - inter || 1;
-  return inter / uni;
-}
-
-// 5) canonizador automático con umbral (evita mezclar empresas distintas)
-const CANON = new Map();            // claveCanonica -> nombre representativo
-// Cachea resultados de canonKey para no recalcular una y otra vez
-const CANON_CACHE = new Map();      // baseName(nombre) -> key canónica
-const UMBRAL_JACCARD = 0.78;        // ajustable (0.70–0.85)
-const MAX_LEN_DIFF   = 5;           // bloquea candidatos con diferencia grande de tokens
-
-function canonKey(nombre){
-  const bn = baseName(nombre);
-  // 0) cache directo
-  if (CANON_CACHE.has(bn)) return CANON_CACHE.get(bn);
-
-  // 1) fingerprint base (tokens útiles ordenados)
-  const fp = fingerprint(nombre);
-  if (CANON.has(fp)) { 
-    CANON_CACHE.set(bn, fp);
-    return fp;
-  }
-
-  const toksNew = tokensUtiles(nombre);
-
-  // 2) busca mejor candidato entre los ya vistos
-  let bestKey = null, bestScore = 0;
-
-  for (const [key, repr] of CANON){               // repr = nombre representativo guardado
-    const toksKey = key.split("+").filter(Boolean);
-
-    // Filtro rápido por diferencia de tamaño PERO permite comparación si uno de los dos tiene 1 token (siglas/pegados)
-    const lenDiff = Math.abs(toksKey.length - toksNew.length);
-    if (lenDiff > MAX_LEN_DIFF && !(toksKey.length === 1 || toksNew.length === 1)) continue;
-
-    const score = simScore(nombre, repr || key);
-    if (score > bestScore) { bestScore = score; bestKey = key; }
-  }
-
-  // 3) decide
-  const out = (bestScore >= UMBRAL_JACCARD) ? bestKey : fp;
-
-  // 4) si es nueva clave, registra representativo
-  if (out === fp) CANON.set(fp, bn);
-
-  // 5) cachea y devuelve
-  CANON_CACHE.set(bn, out);
-  return out;
-}
-
 function money(n){return Number(n||0).toLocaleString('es-CO')}
 function setText(sel,txt){var el=$(sel); if(el) el.textContent=txt}
 function showError(msg){setText('#debug','⚠️ '+msg)}
@@ -446,7 +387,7 @@ function parseClientsText(text){
 }
 function upsertClientes(rows){var ok=0; rows.forEach(function(r){var n=String(r.nombre||'').trim(); 
                                                                  if(!n) return; 
-                                                                 if(!state.clientes.some(function(c){return canonKey(c.razonSocial)===canonKey(n)})){state.clientes.push({razonSocial:n});} ok++;})
+                                                                 if(!state.clientes.some(function(c){return matchKey(c.razonSocial)===matchKey(n)})){state.clientes.push({razonSocial:n});} ok++;})
                                                                   ; return ok}
 function renderClientes(){ setText('#kpiClientes',state.clientes.length); var q=slug(($('#qClientes')||{value:''}).value); var tb=$('#tbClientes'); if(!tb) return; tb.innerHTML=''; state.clientes.filter(function(c){return !q||slug(c.razonSocial).includes(q)}).sort(function(a,b){return a.razonSocial.localeCompare(b.razonSocial)}).forEach(function(c){var tr=document.createElement('tr'); tr.innerHTML='<td>'+c.razonSocial+'</td>'; tb.appendChild(tr)}); var dl=$('#dlClientes'); if(dl){dl.innerHTML=state.clientes.map(function(c){return '<option value="'+c.razonSocial.replace(/"/g,'&quot;')+'">'}).join('')}}
 
@@ -470,17 +411,17 @@ function parseSalesText(text){
 }
 function addVenta(v){
   var n=String(v.nombre||'').trim(); if(!n) return;
-  var cli=state.clientes.find(function(c){return canonKey(c.razonSocial)===canonKey(n)});
+  var cli=state.clientes.find(function(c){return matchKey(c.razonSocial)===matchKey(n)});
   if(!cli){cli={razonSocial:n}; state.clientes.push(cli);} 
   state.ventas.push({cliente:cli.razonSocial, importe:Number(v.importe)||0, tipo:String(v.tipo||'EQUIPO').toUpperCase()})
 }
 function renderVentas(){
   var sum={}, cnt={}, fac={};
-  state.ventas.forEach(function(v){var k=canonKey(v.cliente); sum[k]=(sum[k]||0)+Number(v.importe||0); cnt[k]=(cnt[k]||0)+1});
-  state.facturas.forEach(function(f){var k=canonKey(f.cliente); fac[k]=(fac[k]||0)+Number(f.importe||0)});
+  state.ventas.forEach(function(v){var k=matchKey(v.cliente); sum[k]=(sum[k]||0)+Number(v.importe||0); cnt[k]=(cnt[k]||0)+1});
+  state.facturas.forEach(function(f){var k=matchKey(f.cliente); fac[k]=(fac[k]||0)+Number(f.importe||0)});
   var tb=$('#tbVentas'); if(!tb) return; tb.innerHTML='';
   var rows=state.clientes.map(function(c){
-    var k=canonKey(c.razonSocial);
+    var k=matchKey(c.razonSocial);
     return {nombre:c.razonSocial, suma:sum[k]||0, recs:cnt[k]||0, fact:(fac[k]||0)} 
   }).sort(function(a,b){return b.suma-a.suma});
   rows.forEach(function(r){
@@ -494,12 +435,12 @@ function renderVentas(){
 function puntosPorVenta(v){var sub=Number(v.importe)||0; var tipo=String(v.tipo||'EQUIPO').toUpperCase(); var R=state.reglas; if(tipo==='SERVICIO_INGENIERIA'){return Math.floor(sub/R.servicios.umbral)*R.servicios.puntos;} return Math.floor(sub/R.equipos.umbral)*R.equipos.puntos}
 function renderPuntos(){
   const sum={}, red={};
-  state.ventas.forEach(v=>{ const k=canonKey(v.cliente); sum[k]=(sum[k]||0)+(Number(v.importe)||0); });
-  state.redenciones.forEach(r=>{ const k=canonKey(r.cliente); red[k]=(red[k]||0)+(Number(r.puntos)||0); });
+  state.ventas.forEach(v=>{ const k=matchKey(v.cliente); sum[k]=(sum[k]||0)+(Number(v.importe)||0); });
+  state.redenciones.forEach(r=>{ const k=matchKey(r.cliente); red[k]=(red[k]||0)+(Number(r.puntos)||0); });
 
   const tb = $('#tbPuntos'); if(!tb) return; tb.innerHTML='';
   const rows = state.clientes.map(c=>{
-    const k = canonKey(c.razonSocial);
+    const k = matchKey(c.razonSocial);
     const pts = computePtsCliente(k);           // << cálculo por totales
     const rd  = red[k]||0;
     return { nombre:c.razonSocial, suma:sum[k]||0, pts, red:rd, disp:Math.max(pts-rd,0) };
@@ -792,19 +733,18 @@ async function persistAwards(){
 
 // ===== Redención & histórico
 function puntosDisponibles(nombre){
-  const key = canonKey(nombre);
+  const key = matchKey(nombre);
   const ptsAcum = computePtsCliente(key);
   const red = state.redenciones
-    .filter(r => canonKey(r.cliente) === key)
+    .filter(r => matchKey(r.cliente) === key)
     .reduce((a,b) => a + Number(b.puntos||0), 0);
   return Math.max(ptsAcum - red, 0);
 }
-
 function renderHist(){ var tb=$('#tbHist'); if(!tb) return; tb.innerHTML=''; (state.redenciones||[]).slice().sort(function(a,b){return String(b.fecha||'').localeCompare(String(a.fecha||''))}).forEach(function(r){ var d=new Date(r.fecha); var f=isNaN(d)?r.fecha:d.toLocaleString('es-CO'); var tr=document.createElement('tr'); tr.innerHTML = '<td>'+f+'</td><td>'+r.cliente+'</td><td>'+r.puntos+'</td><td>'+(r.premio||'')+'</td><td><button class="btn" data-action="del-redeem" data-id="'+(r.id||'')+'">Deshacer</button></td>';; tb.appendChild(tr) })}
 
 function isoMin(x){ try{ return new Date(x).toISOString().slice(0,16); }catch(_){ return String(x||''); } }
 function sameRedeem(a,b){
-  return canonKey(a.cliente)===canonKey(b.cliente) &&
+  return matchKey(a.cliente)===matchKey(b.cliente) &&
          Number(a.puntos)===Number(b.puntos) &&
          String(a.premio||'')===String(b.premio||'') &&
          isoMin(a.fecha)===isoMin(b.fecha);
@@ -815,7 +755,7 @@ function computePtsCliente(key){
   const tipoSrv = (state.reglas && state.reglas.servicios && state.reglas.servicios.tipo) || 'SERVICIO_INGENIERIA';
 
   state.ventas.forEach(v => {
-    if (canonKey(v.cliente) !== key) return;
+    if (matchKey(v.cliente) !== key) return;      // <-- antes usaba nameKey
     const t = String(v.tipo || 'EQUIPO').toUpperCase();
     if (t === tipoSrv) sumSrv += Number(v.importe) || 0;
     else               sumEq  += Number(v.importe) || 0;
