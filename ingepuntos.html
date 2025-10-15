@@ -176,7 +176,7 @@
         <h3 style="margin-top:0">Histórico de Redenciones</h3>
         <div style="overflow:auto">
           <table>
-            <thead><tr><th>Fecha</th><th>Cliente</th><th>Ingepuntos</th><th>Premio</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Cliente</th><th>Ingepuntos</th><th>Premio</th><th>Acciones</th></tr></thead>
             <tbody id="tbHist"></tbody>
           </table>
         </div>
@@ -565,13 +565,16 @@ async function loadRedencionesFromJSON(url){
   const data = await r.json();
   const list = Array.isArray(data?.redenciones) ? data.redenciones : [];
   // normaliza (por si faltan campos)
-  state.redenciones = list.map(x => ({
-    cliente: String(x.cliente||'').trim(),
+state.redenciones = (Array.isArray(data?.redenciones)?data.redenciones:[])
+  .map((x,i)=>({
+    id:     x.id || ('r'+(x.fecha||'')+'|'+slug(x.cliente||'')+'|'+(x.puntos||0)+'|'+i),
+    cliente:String(x.cliente||'').trim(),
     puntos: Number(x.puntos||0),
     premio: String(x.premio||''),
-    fecha: x.fecha || new Date().toISOString()
-  })).filter(x => x.cliente && x.puntos>0);
-  renderPuntos(); renderHist();
+    fecha:  x.fecha || new Date().toISOString()
+  }))
+  .filter(x=> x.cliente && x.puntos>0);
+renderPuntos(); renderHist();
 }
 
 async function saveRedencionRemote(item){
@@ -582,6 +585,24 @@ async function saveRedencionRemote(item){
   });
   if(!r.ok) throw new Error(await r.text());
   return true;
+}
+
+async function deleteRedencionRemote(id){
+  // lee
+  const r = await fetch(API_REDEEMS_URL, { cache:'no-store' });
+  if(!r.ok) throw new Error(await r.text());
+  const data = await r.json();
+  const list = Array.isArray(data?.redenciones) ? data.redenciones : [];
+  // filtra por id (conserva las que no coinciden)
+  const filtered = list.filter(x => String(x.id||'') !== String(id));
+  // guarda
+  const r2 = await fetch(API_REDEEMS_URL, {
+    method:'PUT',
+    headers:{ 'Content-Type':'application/json' },
+    body: JSON.stringify({ redenciones: filtered })
+  });
+  if(!r2.ok) throw new Error(await r2.text());
+  return filtered;
 }
 
 // Guarda remoto (si API_AWARDS_URL responde). Devuelve true si guardó.
@@ -611,7 +632,8 @@ async function persistAwards(){
 
 // ===== Redención & histórico
 function puntosDisponibles(nombre){ var pts=0,red=0,key=slug(nombre); state.ventas.filter(function(v){return slug(v.cliente)===key}).forEach(function(v){pts+=puntosPorVenta(v)}); state.redenciones.filter(function(r){return slug(r.cliente)===key}).forEach(function(r){red+=Number(r.puntos||0)}); return Math.max(pts-red,0) }
-function renderHist(){ var tb=$('#tbHist'); if(!tb) return; tb.innerHTML=''; (state.redenciones||[]).slice().sort(function(a,b){return String(b.fecha||'').localeCompare(String(a.fecha||''))}).forEach(function(r){ var d=new Date(r.fecha); var f=isNaN(d)?r.fecha:d.toLocaleString('es-CO'); var tr=document.createElement('tr'); tr.innerHTML='<td>'+f+'</td><td>'+r.cliente+'</td><td>'+r.puntos+'</td><td>'+(r.premio||'')+'</td>'; tb.appendChild(tr) })}
+function renderHist(){ var tb=$('#tbHist'); if(!tb) return; tb.innerHTML=''; (state.redenciones||[]).slice().sort(function(a,b){return String(b.fecha||'').localeCompare(String(a.fecha||''))}).forEach(function(r){ var d=new Date(r.fecha); var f=isNaN(d)?r.fecha:d.toLocaleString('es-CO'); var tr=document.createElement('tr'); var d=new Date(r.fecha); var f=isNaN(d)?r.fecha:d.toLocaleString('es-CO');
+tr.innerHTML = '<td>'+f+'</td><td>'+r.cliente+'</td><td>'+r.puntos+'</td><td>'+(r.premio||'')+'</td><td><button class="btn" data-action="del-redeem" data-id="'+(r.id||'')+'">Deshacer</button></td>';; tb.appendChild(tr) })}
 
 // ===== Handlers
 function parseInvoicedText(text){ var rows=splitCSV(text), hdr=null, idx=0; for(var i=0;i<Math.min(60,rows.length);i++){ var upp=(rows[i]||[]).map(slug); var hasName=(upp.indexOf('NOMBRE DE LA CUENTA')>=0||upp.indexOf('RAZONSOCIAL')>=0||upp.indexOf('NOMBRE TERCERO')>=0||upp.indexOf('NOMBRE_TERCERO')>=0||upp.indexOf('CLIENTE')>=0); var hasAmt=(upp.indexOf('FACTURADO')>=0||upp.indexOf('VALOR BRUTO')>=0||upp.indexOf('VALOR_BRUTO')>=0||upp.indexOf('IMPORTE')>=0||upp.indexOf('TOTAL')>=0||upp.indexOf('SUBTOTAL')>=0); if(hasName&&hasAmt){ hdr=rows[i]; idx=i; break; } } if(!hdr) return {ok:false,reason:'Se requiere columna de cliente y monto (Facturado/Valor Bruto/Importe/Total/Subtotal).'}; var H=headIndex(hdr); var iName= H['RAZONSOCIAL']!=null?H['RAZONSOCIAL']:(H['NOMBRE TERCERO']!=null?H['NOMBRE TERCERO']:(H['NOMBRE_TERCERO']!=null?H['NOMBRE_TERCERO']:(H['CLIENTE']!=null?H['CLIENTE']:H['NOMBRE DE LA CUENTA']))); var iAmt = H['FACTURADO']!=null?H['FACTURADO']:(H['VALOR BRUTO']!=null?H['VALOR BRUTO']:(H['VALOR_BRUTO']!=null?H['VALOR_BRUTO']:(H['IMPORTE']!=null?H['IMPORTE']:(H['TOTAL']!=null?H['TOTAL']:H['SUBTOTAL'])))); var body=rows.slice(idx+1); var out=body.filter(function(r){return r&&r.some(function(c){return String(c).trim()!==''})}).map(function(r){ return { nombre:r[iName], importe:parseMoney(r[iAmt]) }; }); return {ok:true, rows:out}; }
@@ -685,6 +707,26 @@ var actions = {
     $('#simAwards').innerHTML=html;
   },
 
+'del-redeem': async function(el){
+  const id = el.getAttribute('data-id');
+  if(!id) return alert('No se puede eliminar: falta ID');
+  if(!confirm('¿Deshacer esta redención?')) return;
+  try{
+    const list = await deleteRedencionRemote(id);
+    // sincroniza estado UI
+    state.redenciones = list.map((x,i)=>({
+      id: x.id || ('r'+(x.fecha||'')+'|'+slug(x.cliente||'')+'|'+(x.puntos||0)+'|'+i),
+      cliente: String(x.cliente||'').trim(),
+      puntos: Number(x.puntos||0),
+      premio: String(x.premio||''),
+      fecha:  x.fecha || new Date().toISOString()
+    }));
+    renderPuntos(); renderHist(); actions['simulate']();
+  }catch(e){
+    showError('No se pudo eliminar: '+(e.message||e));
+  }
+}
+
 'redeem': async function(el){
   const nombre=(($('#inpRedeemClient')||{value:''}).value||'').trim();
   const pts=Number(el.getAttribute('data-pts'))||0;
@@ -693,7 +735,13 @@ var actions = {
   const disp=puntosDisponibles(nombre);
   if(pts>disp) return alert('Puntos insuficientes. Disponibles: '+disp);
 
-  const item = { cliente:nombre, puntos:pts, premio:desc, fecha:new Date().toISOString() };
+  const item = {
+  id: (crypto?.randomUUID ? crypto.randomUUID() : ('r'+Date.now()+Math.random().toString(16).slice(2))),
+  cliente: nombre,
+  puntos:  pts,
+  premio:  desc,
+  fecha:   new Date().toISOString()
+  };
 
   try{
     // 1) persistir primero en el servidor
