@@ -264,7 +264,7 @@ function simScore(a, b){
   const B = tokenSet(b);
   if (A.size === 0 || B.size === 0) return 0;
 
-  // Si un lado es sólo una sigla/pegado y ese token está en el otro → match fuerte
+  // Si un lado es solo una sigla/pegado y ese token está en el otro → match fuerte
   if (A.size === 1){ const t = [...A][0]; if (B.has(t)) return 0.95; }
   if (B.size === 1){ const t = [...B][0]; if (A.has(t)) return 0.95; }
 
@@ -277,31 +277,50 @@ function simScore(a, b){
 
 // 5) canonizador automático con umbral (evita mezclar empresas distintas)
 const CANON = new Map();            // claveCanonica -> nombre representativo
+// Cachea resultados de canonKey para no recalcular una y otra vez
+const CANON_CACHE = new Map();      // baseName(nombre) -> key canónica
 const UMBRAL_JACCARD = 0.78;        // ajustable (0.70–0.85)
 const MAX_LEN_DIFF   = 5;           // bloquea candidatos con diferencia grande de tokens
 
 function canonKey(nombre){
+  const bn = baseName(nombre);
+  // 0) cache directo
+  if (CANON_CACHE.has(bn)) return CANON_CACHE.get(bn);
+
+  // 1) fingerprint base (tokens útiles ordenados)
   const fp = fingerprint(nombre);
-  if (CANON.has(fp)) return fp; // ya existe esa huella exacta
+  if (CANON.has(fp)) { 
+    CANON_CACHE.set(bn, fp);
+    return fp;
+  }
 
   const toksNew = tokensUtiles(nombre);
 
-  // busca mejor candidato entre los ya vistos
+  // 2) busca mejor candidato entre los ya vistos
   let bestKey = null, bestScore = 0;
-  for (const key of CANON.keys()){
+
+  for (const [key, repr] of CANON){               // repr = nombre representativo guardado
     const toksKey = key.split("+").filter(Boolean);
-    if (Math.abs(toksKey.length - toksNew.length) > MAX_LEN_DIFF) continue; // filtro rápido
-    const score = simScore(nombre, CANON.get(key) || key);
+
+    // Filtro rápido por diferencia de tamaño PERO permite comparación si uno de los dos tiene 1 token (siglas/pegados)
+    const lenDiff = Math.abs(toksKey.length - toksNew.length);
+    if (lenDiff > MAX_LEN_DIFF && !(toksKey.length === 1 || toksNew.length === 1)) continue;
+
+    const score = simScore(nombre, repr || key);
     if (score > bestScore) { bestScore = score; bestKey = key; }
   }
 
-  if (bestScore >= UMBRAL_JACCARD) {
-    return bestKey; // suficientemente similar
-  } else {
-    CANON.set(fp, baseName(nombre)); // registramos clave nueva
-    return fp;
-  }
+  // 3) decide
+  const out = (bestScore >= UMBRAL_JACCARD) ? bestKey : fp;
+
+  // 4) si es nueva clave, registra representativo
+  if (out === fp) CANON.set(fp, bn);
+
+  // 5) cachea y devuelve
+  CANON_CACHE.set(bn, out);
+  return out;
 }
+
 function money(n){return Number(n||0).toLocaleString('es-CO')}
 function setText(sel,txt){var el=$(sel); if(el) el.textContent=txt}
 function showError(msg){setText('#debug','⚠️ '+msg)}
