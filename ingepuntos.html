@@ -658,9 +658,38 @@ async function persistAwards(){
 }
 
 // ===== Redención & histórico
-function puntosDisponibles(nombre){ var pts=0,red=0,key=slug(nombre); state.ventas.filter(function(v){return slug(v.cliente)===key}).forEach(function(v){pts+=puntosPorVenta(v)}); state.redenciones.filter(function(r){return slug(r.cliente)===key}).forEach(function(r){red+=Number(r.puntos||0)}); return Math.max(pts-red,0) }
+function puntosDisponibles(nombre){
+  const key = slug(nombre);
+  const ptsAcum = computePtsCliente(key);  // cálculo por totales del cliente
+  const red = state.redenciones
+    .filter(r => slug(r.cliente) === key)
+    .reduce((a,b) => a + Number(b.puntos||0), 0);
+  return Math.max(ptsAcum - red, 0);
+}
 function renderHist(){ var tb=$('#tbHist'); if(!tb) return; tb.innerHTML=''; (state.redenciones||[]).slice().sort(function(a,b){return String(b.fecha||'').localeCompare(String(a.fecha||''))}).forEach(function(r){ var d=new Date(r.fecha); var f=isNaN(d)?r.fecha:d.toLocaleString('es-CO'); var tr=document.createElement('tr'); tr.innerHTML = '<td>'+f+'</td><td>'+r.cliente+'</td><td>'+r.puntos+'</td><td>'+(r.premio||'')+'</td><td><button class="btn" data-action="del-redeem" data-id="'+(r.id||'')+'">Deshacer</button></td>';; tb.appendChild(tr) })}
 
+function isoMin(x){ try{ return new Date(x).toISOString().slice(0,16); }catch(_){ return String(x||''); } }
+function sameRedeem(a,b){
+  return slug(a.cliente)===slug(b.cliente) &&
+         Number(a.puntos)===Number(b.puntos) &&
+         String(a.premio||'')===String(b.premio||'') &&
+         isoMin(a.fecha)===isoMin(b.fecha);
+}
+
+function computePtsCliente(key){
+  let sumEq=0, sumSrv=0;
+  state.ventas.forEach(v=>{
+    if (slug(v.cliente)!==key) return;
+    const t = String(v.tipo||'EQUIPO').toUpperCase();
+    if (t==='SERVICIO_INGENIERIA') sumSrv += Number(v.importe)||0;
+    else sumEq += Number(v.importe)||0;
+  });
+  const R = state.reglas;
+  const ptsEq  = Math.floor(sumEq  / R.equipos.umbral)    * R.equipos.puntos;
+  const ptsSrv = Math.floor(sumSrv / R.servicios.umbral)  * R.servicios.puntos;
+  return ptsEq + ptsSrv;
+}
+  
 // ===== Handlers
 function parseInvoicedText(text){ var rows=splitCSV(text), hdr=null, idx=0; for(var i=0;i<Math.min(60,rows.length);i++){ var upp=(rows[i]||[]).map(slug); var hasName=(upp.indexOf('NOMBRE DE LA CUENTA')>=0||upp.indexOf('RAZONSOCIAL')>=0||upp.indexOf('NOMBRE TERCERO')>=0||upp.indexOf('NOMBRE_TERCERO')>=0||upp.indexOf('CLIENTE')>=0); var hasAmt=(upp.indexOf('FACTURADO')>=0||upp.indexOf('VALOR BRUTO')>=0||upp.indexOf('VALOR_BRUTO')>=0||upp.indexOf('IMPORTE')>=0||upp.indexOf('TOTAL')>=0||upp.indexOf('SUBTOTAL')>=0); if(hasName&&hasAmt){ hdr=rows[i]; idx=i; break; } } if(!hdr) return {ok:false,reason:'Se requiere columna de cliente y monto (Facturado/Valor Bruto/Importe/Total/Subtotal).'}; var H=headIndex(hdr); var iName= H['RAZONSOCIAL']!=null?H['RAZONSOCIAL']:(H['NOMBRE TERCERO']!=null?H['NOMBRE TERCERO']:(H['NOMBRE_TERCERO']!=null?H['NOMBRE_TERCERO']:(H['CLIENTE']!=null?H['CLIENTE']:H['NOMBRE DE LA CUENTA']))); var iAmt = H['FACTURADO']!=null?H['FACTURADO']:(H['VALOR BRUTO']!=null?H['VALOR BRUTO']:(H['VALOR_BRUTO']!=null?H['VALOR_BRUTO']:(H['IMPORTE']!=null?H['IMPORTE']:(H['TOTAL']!=null?H['TOTAL']:H['SUBTOTAL'])))); var body=rows.slice(idx+1); var out=body.filter(function(r){return r&&r.some(function(c){return String(c).trim()!==''})}).map(function(r){ return { nombre:r[iName], importe:parseMoney(r[iAmt]) }; }); return {ok:true, rows:out}; }
 var actions = {
@@ -732,28 +761,6 @@ var actions = {
       }).join('')+'</tbody></table></div>';
     $('#simAwards').innerHTML=html;
   },
-
-function isoMin(x){ try{ return new Date(x).toISOString().slice(0,16); }catch(_){ return String(x||''); } }
-function sameRedeem(a,b){
-  return slug(a.cliente)===slug(b.cliente) &&
-         Number(a.puntos)===Number(b.puntos) &&
-         String(a.premio||'')===String(b.premio||'') &&
-         isoMin(a.fecha)===isoMin(b.fecha);
-}
-
-function computePtsCliente(key){
-  let sumEq=0, sumSrv=0;
-  state.ventas.forEach(v=>{
-    if (slug(v.cliente)!==key) return;
-    const t = String(v.tipo||'EQUIPO').toUpperCase();
-    if (t==='SERVICIO_INGENIERIA') sumSrv += Number(v.importe)||0;
-    else sumEq += Number(v.importe)||0;
-  });
-  const R = state.reglas;
-  const ptsEq  = Math.floor(sumEq  / R.equipos.umbral)    * R.equipos.puntos;
-  const ptsSrv = Math.floor(sumSrv / R.servicios.umbral)  * R.servicios.puntos;
-  return ptsEq + ptsSrv;
-}
 
 'del-redeem': async function(el){
   const id = el.getAttribute('data-id');
