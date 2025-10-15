@@ -198,6 +198,31 @@ var state={ clientes:[], ventas:[], facturas:[], redenciones:[], premios:[],
 function $(s,root){return (root||document).querySelector(s)}
 function $all(s,root){return Array.from((root||document).querySelectorAll(s))}
 function slug(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim()}
+// Normaliza nombres de empresa para emparejar: quita acentos, puntuación,
+// colapsa "S A S" -> "SAS" y remueve sufijos legales comunes.
+function nameKey(s){
+  let x = String(s||'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'') // sin acentos
+    .toUpperCase();
+
+  // colapsa variantes "S A S" -> "SAS"
+  x = x.replace(/\bS\s*A\s*S\b/g, 'SAS');
+
+  // quita puntuación → deja letras/números/espacio
+  x = x.replace(/[^\w\s]/g, ' ');
+
+  // elimina sufijos legales comunes (al final o aislados)
+  const SUFIJOS = [
+    'SAS','S\\.A\\.S','SA','S\\.A','LTDA','LTD','SEN C','S EN C','SENC','BIC',
+    'CIA','CIA LTDA','COMPA(?:N|Ñ)IA','COMPANIA'
+  ];
+  const re = new RegExp(`\\b(?:${SUFIJOS.join('|')})\\b`, 'g');
+  x = x.replace(re, ' ');
+
+  // espacios
+  x = x.replace(/\s+/g,' ').trim();
+  return x;
+}
 function money(n){return Number(n||0).toLocaleString('es-CO')}
 function setText(sel,txt){var el=$(sel); if(el) el.textContent=txt}
 function showError(msg){setText('#debug','⚠️ '+msg)}
@@ -321,7 +346,10 @@ function parseClientsText(text){
   var out=body.map(function(r){return {nombre:r[idx]}}).filter(function(r){return String(r.nombre||'').trim()});
   return {ok:true,rows:out};
 }
-function upsertClientes(rows){var ok=0; rows.forEach(function(r){var n=String(r.nombre||'').trim(); if(!n) return; if(!state.clientes.some(function(c){return slug(c.razonSocial)===slug(n)})){state.clientes.push({razonSocial:n});} ok++;}); return ok}
+function upsertClientes(rows){var ok=0; rows.forEach(function(r){var n=String(r.nombre||'').trim(); 
+                                                                 if(!n) return; 
+                                                                 if(!state.clientes.some(function(c){return nameKey(c.razonSocial)===nameKey(n)})){state.clientes.push({razonSocial:n});} ok++;})
+                                                                  ; return ok}
 function renderClientes(){ setText('#kpiClientes',state.clientes.length); var q=slug(($('#qClientes')||{value:''}).value); var tb=$('#tbClientes'); if(!tb) return; tb.innerHTML=''; state.clientes.filter(function(c){return !q||slug(c.razonSocial).includes(q)}).sort(function(a,b){return a.razonSocial.localeCompare(b.razonSocial)}).forEach(function(c){var tr=document.createElement('tr'); tr.innerHTML='<td>'+c.razonSocial+'</td>'; tb.appendChild(tr)}); var dl=$('#dlClientes'); if(dl){dl.innerHTML=state.clientes.map(function(c){return '<option value="'+c.razonSocial.replace(/"/g,'&quot;')+'">'}).join('')}}
 
 // ===== Ventas
@@ -344,17 +372,17 @@ function parseSalesText(text){
 }
 function addVenta(v){
   var n=String(v.nombre||'').trim(); if(!n) return;
-  var cli=state.clientes.find(function(c){return slug(c.razonSocial)===slug(n)});
+  var cli=state.clientes.find(function(c){return nameKey(c.razonSocial)===nameKey(n)});
   if(!cli){cli={razonSocial:n}; state.clientes.push(cli);} 
   state.ventas.push({cliente:cli.razonSocial, importe:Number(v.importe)||0, tipo:String(v.tipo||'EQUIPO').toUpperCase()})
 }
 function renderVentas(){
   var sum={}, cnt={}, fac={};
-  state.ventas.forEach(function(v){var k=slug(v.cliente); sum[k]=(sum[k]||0)+Number(v.importe||0); cnt[k]=(cnt[k]||0)+1});
-  state.facturas.forEach(function(f){var k=slug(f.cliente); fac[k]=(fac[k]||0)+Number(f.importe||0)});
+  state.ventas.forEach(function(v){var k=nameKey(v.cliente); sum[k]=(sum[k]||0)+Number(v.importe||0); cnt[k]=(cnt[k]||0)+1});
+  state.facturas.forEach(function(f){var k=nameKey(f.cliente); fac[k]=(fac[k]||0)+Number(f.importe||0)});
   var tb=$('#tbVentas'); if(!tb) return; tb.innerHTML='';
   var rows=state.clientes.map(function(c){
-    var k=slug(c.razonSocial);
+    var k=nameKey(c.razonSocial);
     return {nombre:c.razonSocial, suma:sum[k]||0, recs:cnt[k]||0, fact:(fac[k]||0)} 
   }).sort(function(a,b){return b.suma-a.suma});
   rows.forEach(function(r){
@@ -368,12 +396,12 @@ function renderVentas(){
 function puntosPorVenta(v){var sub=Number(v.importe)||0; var tipo=String(v.tipo||'EQUIPO').toUpperCase(); var R=state.reglas; if(tipo==='SERVICIO_INGENIERIA'){return Math.floor(sub/R.servicios.umbral)*R.servicios.puntos;} return Math.floor(sub/R.equipos.umbral)*R.equipos.puntos}
 function renderPuntos(){
   const sum={}, red={};
-  state.ventas.forEach(v=>{ const k=slug(v.cliente); sum[k]=(sum[k]||0)+(Number(v.importe)||0); });
-  state.redenciones.forEach(r=>{ const k=slug(r.cliente); red[k]=(red[k]||0)+(Number(r.puntos)||0); });
+  state.ventas.forEach(v=>{ const k=nameKey(v.cliente); sum[k]=(sum[k]||0)+(Number(v.importe)||0); });
+  state.redenciones.forEach(r=>{ const k=nameKey(r.cliente); red[k]=(red[k]||0)+(Number(r.puntos)||0); });
 
   const tb = $('#tbPuntos'); if(!tb) return; tb.innerHTML='';
   const rows = state.clientes.map(c=>{
-    const k   = slug(c.razonSocial);
+    const k = nameKey(c.razonSocial);
     const pts = computePtsCliente(k);           // << cálculo por totales
     const rd  = red[k]||0;
     return { nombre:c.razonSocial, suma:sum[k]||0, pts, red:rd, disp:Math.max(pts-rd,0) };
@@ -666,10 +694,10 @@ async function persistAwards(){
 
 // ===== Redención & histórico
 function puntosDisponibles(nombre){
-  const key = slug(nombre);
-  const ptsAcum = computePtsCliente(key);  // cálculo por totales del cliente
+  const key = nameKey(nombre);
+  const ptsAcum = computePtsCliente(key);
   const red = state.redenciones
-    .filter(r => slug(r.cliente) === key)
+    .filter(r => nameKey(r.cliente) === key)
     .reduce((a,b) => a + Number(b.puntos||0), 0);
   return Math.max(ptsAcum - red, 0);
 }
@@ -677,7 +705,7 @@ function renderHist(){ var tb=$('#tbHist'); if(!tb) return; tb.innerHTML=''; (st
 
 function isoMin(x){ try{ return new Date(x).toISOString().slice(0,16); }catch(_){ return String(x||''); } }
 function sameRedeem(a,b){
-  return slug(a.cliente)===slug(b.cliente) &&
+  return nameKey(a.cliente)===nameKey(b.cliente) &&
          Number(a.puntos)===Number(b.puntos) &&
          String(a.premio||'')===String(b.premio||'') &&
          isoMin(a.fecha)===isoMin(b.fecha);
@@ -686,7 +714,7 @@ function sameRedeem(a,b){
 function computePtsCliente(key){
   let sumEq=0, sumSrv=0;
   state.ventas.forEach(v=>{
-    if (slug(v.cliente)!==key) return;
+    if (nameKey(v.cliente)!==key) return;
     const t = String(v.tipo||'EQUIPO').toUpperCase();
     if (t==='SERVICIO_INGENIERIA') sumSrv += Number(v.importe)||0;
     else sumEq += Number(v.importe)||0;
