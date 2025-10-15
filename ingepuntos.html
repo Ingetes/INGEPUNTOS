@@ -359,7 +359,29 @@ function renderVentas(){
 
 // ===== Puntos
 function puntosPorVenta(v){var sub=Number(v.importe)||0; var tipo=String(v.tipo||'EQUIPO').toUpperCase(); var R=state.reglas; if(tipo==='SERVICIO_INGENIERIA'){return Math.floor(sub/R.servicios.umbral)*R.servicios.puntos;} return Math.floor(sub/R.equipos.umbral)*R.equipos.puntos}
-function renderPuntos(){ var by={}; state.ventas.forEach(function(v){var k=slug(v.cliente); if(!by[k]) by[k]={suma:0,pts:0,red:0,nombre:v.cliente}; by[k].suma+=Number(v.importe||0); by[k].pts+=puntosPorVenta(v)}); state.redenciones.forEach(function(r){var k=slug(r.cliente); if(!by[k]) by[k]={suma:0,pts:0,red:0,nombre:r.cliente}; by[k].red+=Number(r.puntos||0)}); var tb=$('#tbPuntos'); if(!tb) return; tb.innerHTML=''; var rows=state.clientes.map(function(c){var k=slug(c.razonSocial); var d=by[k]||{suma:0,pts:0,red:0}; return {nombre:c.razonSocial,suma:d.suma,pts:d.pts,red:d.red,disp:Math.max(d.pts-d.red,0)}}).sort(function(a,b){return b.suma-a.suma}); rows.forEach(function(r){var tr=document.createElement('tr'); tr.innerHTML='<td>'+r.nombre+'</td><td class="nowrap">'+money(r.suma)+'</td><td class="nowrap">'+r.pts+'</td><td class="nowrap">'+r.disp+'</td><td class="nowrap">'+r.red+'</td>'; tb.appendChild(tr)})}
+function renderPuntos(){
+  const sum={}, red={};
+  state.ventas.forEach(v=>{ const k=slug(v.cliente); sum[k]=(sum[k]||0)+(Number(v.importe)||0); });
+  state.redenciones.forEach(r=>{ const k=slug(r.cliente); red[k]=(red[k]||0)+(Number(r.puntos)||0); });
+
+  const tb = $('#tbPuntos'); if(!tb) return; tb.innerHTML='';
+  const rows = state.clientes.map(c=>{
+    const k   = slug(c.razonSocial);
+    const pts = computePtsCliente(k);           // << cálculo por totales
+    const rd  = red[k]||0;
+    return { nombre:c.razonSocial, suma:sum[k]||0, pts, red:rd, disp:Math.max(pts-rd,0) };
+  }).sort((a,b)=> b.suma-a.suma);
+
+  rows.forEach(r=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML = `<td>${r.nombre}</td>
+                    <td class="nowrap">${money(r.suma)}</td>
+                    <td class="nowrap">${r.pts}</td>
+                    <td class="nowrap">${r.disp}</td>
+                    <td class="nowrap">${r.red}</td>`;
+    tb.appendChild(tr);
+  });
+}
 function setupReglas(){
   var R = state.reglas;
   var tipoSrv = (R.servicios && R.servicios.tipo) ? R.servicios.tipo : 'SERVICIO_INGENIERIA';
@@ -587,15 +609,20 @@ async function saveRedencionRemote(item){
   return true;
 }
 
-async function deleteRedencionRemote(id){
-  // lee
+async function deleteRedencionRemote(item){
+  // lee archivo del repo
   const r = await fetch(API_REDEEMS_URL, { cache:'no-store' });
   if(!r.ok) throw new Error(await r.text());
   const data = await r.json();
   const list = Array.isArray(data?.redenciones) ? data.redenciones : [];
-  // filtra por id (conserva las que no coinciden)
-  const filtered = list.filter(x => String(x.id||'') !== String(id));
-  // guarda
+
+  // elimina por: id ó (cliente+puntos+premio+fecha≈min)
+  const filtered = list.filter(x => {
+    const byId  = String(x.id||'') === String(item.id||'');
+    const byCmp = sameRedeem(x, item);
+    return !(byId || byCmp);
+  });
+
   const r2 = await fetch(API_REDEEMS_URL, {
     method:'PUT',
     headers:{ 'Content-Type':'application/json' },
@@ -706,13 +733,37 @@ var actions = {
     $('#simAwards').innerHTML=html;
   },
 
+function isoMin(x){ try{ return new Date(x).toISOString().slice(0,16); }catch(_){ return String(x||''); } }
+function sameRedeem(a,b){
+  return slug(a.cliente)===slug(b.cliente) &&
+         Number(a.puntos)===Number(b.puntos) &&
+         String(a.premio||'')===String(b.premio||'') &&
+         isoMin(a.fecha)===isoMin(b.fecha);
+}
+
+function computePtsCliente(key){
+  let sumEq=0, sumSrv=0;
+  state.ventas.forEach(v=>{
+    if (slug(v.cliente)!==key) return;
+    const t = String(v.tipo||'EQUIPO').toUpperCase();
+    if (t==='SERVICIO_INGENIERIA') sumSrv += Number(v.importe)||0;
+    else sumEq += Number(v.importe)||0;
+  });
+  const R = state.reglas;
+  const ptsEq  = Math.floor(sumEq  / R.equipos.umbral)    * R.equipos.puntos;
+  const ptsSrv = Math.floor(sumSrv / R.servicios.umbral)  * R.servicios.puntos;
+  return ptsEq + ptsSrv;
+}
+
 'del-redeem': async function(el){
   const id = el.getAttribute('data-id');
-  if(!id) return alert('No se puede eliminar: falta ID');
+  const item = (state.redenciones||[]).find(x => String(x.id||'')===String(id));
+  if(!item) return alert('No se pudo identificar la redención');
   if(!confirm('¿Deshacer esta redención?')) return;
+
   try{
-    const list = await deleteRedencionRemote(id);
-    // sincroniza estado UI
+    const list = await deleteRedencionRemote(item);
+    // re-sincroniza estado local desde lo que quedó en el repo
     state.redenciones = list.map((x,i)=>({
       id: x.id || ('r'+(x.fecha||'')+'|'+slug(x.cliente||'')+'|'+(x.puntos||0)+'|'+i),
       cliente: String(x.cliente||'').trim(),
