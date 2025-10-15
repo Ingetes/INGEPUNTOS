@@ -632,8 +632,7 @@ async function persistAwards(){
 
 // ===== Redención & histórico
 function puntosDisponibles(nombre){ var pts=0,red=0,key=slug(nombre); state.ventas.filter(function(v){return slug(v.cliente)===key}).forEach(function(v){pts+=puntosPorVenta(v)}); state.redenciones.filter(function(r){return slug(r.cliente)===key}).forEach(function(r){red+=Number(r.puntos||0)}); return Math.max(pts-red,0) }
-function renderHist(){ var tb=$('#tbHist'); if(!tb) return; tb.innerHTML=''; (state.redenciones||[]).slice().sort(function(a,b){return String(b.fecha||'').localeCompare(String(a.fecha||''))}).forEach(function(r){ var d=new Date(r.fecha); var f=isNaN(d)?r.fecha:d.toLocaleString('es-CO'); var tr=document.createElement('tr'); var d=new Date(r.fecha); var f=isNaN(d)?r.fecha:d.toLocaleString('es-CO');
-tr.innerHTML = '<td>'+f+'</td><td>'+r.cliente+'</td><td>'+r.puntos+'</td><td>'+(r.premio||'')+'</td><td><button class="btn" data-action="del-redeem" data-id="'+(r.id||'')+'">Deshacer</button></td>';; tb.appendChild(tr) })}
+function renderHist(){ var tb=$('#tbHist'); if(!tb) return; tb.innerHTML=''; (state.redenciones||[]).slice().sort(function(a,b){return String(b.fecha||'').localeCompare(String(a.fecha||''))}).forEach(function(r){ var d=new Date(r.fecha); var f=isNaN(d)?r.fecha:d.toLocaleString('es-CO'); var tr=document.createElement('tr'); tr.innerHTML = '<td>'+f+'</td><td>'+r.cliente+'</td><td>'+r.puntos+'</td><td>'+(r.premio||'')+'</td><td><button class="btn" data-action="del-redeem" data-id="'+(r.id||'')+'">Deshacer</button></td>';; tb.appendChild(tr) })}
 
 // ===== Handlers
 function parseInvoicedText(text){ var rows=splitCSV(text), hdr=null, idx=0; for(var i=0;i<Math.min(60,rows.length);i++){ var upp=(rows[i]||[]).map(slug); var hasName=(upp.indexOf('NOMBRE DE LA CUENTA')>=0||upp.indexOf('RAZONSOCIAL')>=0||upp.indexOf('NOMBRE TERCERO')>=0||upp.indexOf('NOMBRE_TERCERO')>=0||upp.indexOf('CLIENTE')>=0); var hasAmt=(upp.indexOf('FACTURADO')>=0||upp.indexOf('VALOR BRUTO')>=0||upp.indexOf('VALOR_BRUTO')>=0||upp.indexOf('IMPORTE')>=0||upp.indexOf('TOTAL')>=0||upp.indexOf('SUBTOTAL')>=0); if(hasName&&hasAmt){ hdr=rows[i]; idx=i; break; } } if(!hdr) return {ok:false,reason:'Se requiere columna de cliente y monto (Facturado/Valor Bruto/Importe/Total/Subtotal).'}; var H=headIndex(hdr); var iName= H['RAZONSOCIAL']!=null?H['RAZONSOCIAL']:(H['NOMBRE TERCERO']!=null?H['NOMBRE TERCERO']:(H['NOMBRE_TERCERO']!=null?H['NOMBRE_TERCERO']:(H['CLIENTE']!=null?H['CLIENTE']:H['NOMBRE DE LA CUENTA']))); var iAmt = H['FACTURADO']!=null?H['FACTURADO']:(H['VALOR BRUTO']!=null?H['VALOR BRUTO']:(H['VALOR_BRUTO']!=null?H['VALOR_BRUTO']:(H['IMPORTE']!=null?H['IMPORTE']:(H['TOTAL']!=null?H['TOTAL']:H['SUBTOTAL'])))); var body=rows.slice(idx+1); var out=body.filter(function(r){return r&&r.some(function(c){return String(c).trim()!==''})}).map(function(r){ return { nombre:r[iName], importe:parseMoney(r[iAmt]) }; }); return {ok:true, rows:out}; }
@@ -725,7 +724,7 @@ var actions = {
   }catch(e){
     showError('No se pudo eliminar: '+(e.message||e));
   }
-}
+},
 
 'redeem': async function(el){
   const nombre=(($('#inpRedeemClient')||{value:''}).value||'').trim();
