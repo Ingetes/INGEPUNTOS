@@ -233,6 +233,35 @@ function nameKey(s){
 
   return x;
 }
+// Clave de emparejamiento más fuerte para cruzar clientes entre archivos
+function matchKey(s){
+  // nameKey ya quita acentos, mayúsculas y sufijos legales comunes
+  let x = nameKey(s).replace(/&/g, ' Y ');
+
+  // tokens y stopwords corporativas / genéricas
+  const STOP = new Set([
+    // artículos / preps
+    'DE','DEL','LA','EL','LOS','LAS','Y','EN','POR','PARA','THE','AND',
+    // corporativas genéricas
+    'INGENIERIA','INGENIERO','INGENIEROS',
+    'AUTOMATIZACION','AUTOMATIZACIONES',
+    'ELECTRICO','ELECTRICA','ELECTRICOS','ELECTRICAS','ELECTROINDUSTRIAL','INDUSTRIAL','INDUSTRIALES',
+    'SERVICIOS','SISTEMAS','TECNOLOGIA','TECNOLOGIAS','TECNICA','TECNICAS',
+    // ya las limpia nameKey, pero por si quedaron
+    'SAS','SA','LTDA','LTD','LIMITADA','BIC','CIA','COMPANIA','COMPANIA',
+    // letras sueltas y comodines que “ensucian”
+    'C','G','P'
+  ]);
+
+  let tokens = x.split(/\s+/).filter(Boolean)
+    // quita stopwords
+    .filter(t => !STOP.has(t) && t.length > 1)
+    // singular muy básico (quitar S final cuando aplica)
+    .map(t => t.endsWith('S') ? t.slice(0, -1) : t);
+
+  // une: METAL ARANGOS -> METALARANGO, C & G -> (se van las letras sueltas)
+  return tokens.join('');
+}
 function money(n){return Number(n||0).toLocaleString('es-CO')}
 function setText(sel,txt){var el=$(sel); if(el) el.textContent=txt}
 function showError(msg){setText('#debug','⚠️ '+msg)}
@@ -358,7 +387,7 @@ function parseClientsText(text){
 }
 function upsertClientes(rows){var ok=0; rows.forEach(function(r){var n=String(r.nombre||'').trim(); 
                                                                  if(!n) return; 
-                                                                 if(!state.clientes.some(function(c){return nameKey(c.razonSocial)===nameKey(n)})){state.clientes.push({razonSocial:n});} ok++;})
+                                                                 if(!state.clientes.some(function(c){return matchKey(c.razonSocial)===matchKey(n)})){state.clientes.push({razonSocial:n});} ok++;})
                                                                   ; return ok}
 function renderClientes(){ setText('#kpiClientes',state.clientes.length); var q=slug(($('#qClientes')||{value:''}).value); var tb=$('#tbClientes'); if(!tb) return; tb.innerHTML=''; state.clientes.filter(function(c){return !q||slug(c.razonSocial).includes(q)}).sort(function(a,b){return a.razonSocial.localeCompare(b.razonSocial)}).forEach(function(c){var tr=document.createElement('tr'); tr.innerHTML='<td>'+c.razonSocial+'</td>'; tb.appendChild(tr)}); var dl=$('#dlClientes'); if(dl){dl.innerHTML=state.clientes.map(function(c){return '<option value="'+c.razonSocial.replace(/"/g,'&quot;')+'">'}).join('')}}
 
@@ -382,17 +411,17 @@ function parseSalesText(text){
 }
 function addVenta(v){
   var n=String(v.nombre||'').trim(); if(!n) return;
-  var cli=state.clientes.find(function(c){return nameKey(c.razonSocial)===nameKey(n)});
+  var cli=state.clientes.find(function(c){return matchKey(c.razonSocial)===matchKey(n)});
   if(!cli){cli={razonSocial:n}; state.clientes.push(cli);} 
   state.ventas.push({cliente:cli.razonSocial, importe:Number(v.importe)||0, tipo:String(v.tipo||'EQUIPO').toUpperCase()})
 }
 function renderVentas(){
   var sum={}, cnt={}, fac={};
-  state.ventas.forEach(function(v){var k=nameKey(v.cliente); sum[k]=(sum[k]||0)+Number(v.importe||0); cnt[k]=(cnt[k]||0)+1});
-  state.facturas.forEach(function(f){var k=nameKey(f.cliente); fac[k]=(fac[k]||0)+Number(f.importe||0)});
+  state.ventas.forEach(function(v){var k=matchKey(v.cliente); sum[k]=(sum[k]||0)+Number(v.importe||0); cnt[k]=(cnt[k]||0)+1});
+  state.facturas.forEach(function(f){var k=matchKey(f.cliente); fac[k]=(fac[k]||0)+Number(f.importe||0)});
   var tb=$('#tbVentas'); if(!tb) return; tb.innerHTML='';
   var rows=state.clientes.map(function(c){
-    var k=nameKey(c.razonSocial);
+    var k=matchKey(c.razonSocial);
     return {nombre:c.razonSocial, suma:sum[k]||0, recs:cnt[k]||0, fact:(fac[k]||0)} 
   }).sort(function(a,b){return b.suma-a.suma});
   rows.forEach(function(r){
@@ -406,12 +435,12 @@ function renderVentas(){
 function puntosPorVenta(v){var sub=Number(v.importe)||0; var tipo=String(v.tipo||'EQUIPO').toUpperCase(); var R=state.reglas; if(tipo==='SERVICIO_INGENIERIA'){return Math.floor(sub/R.servicios.umbral)*R.servicios.puntos;} return Math.floor(sub/R.equipos.umbral)*R.equipos.puntos}
 function renderPuntos(){
   const sum={}, red={};
-  state.ventas.forEach(v=>{ const k=nameKey(v.cliente); sum[k]=(sum[k]||0)+(Number(v.importe)||0); });
-  state.redenciones.forEach(r=>{ const k=nameKey(r.cliente); red[k]=(red[k]||0)+(Number(r.puntos)||0); });
+  state.ventas.forEach(v=>{ const k=matchKey(v.cliente); sum[k]=(sum[k]||0)+(Number(v.importe)||0); });
+  state.redenciones.forEach(r=>{ const k=matchKey(r.cliente); red[k]=(red[k]||0)+(Number(r.puntos)||0); });
 
   const tb = $('#tbPuntos'); if(!tb) return; tb.innerHTML='';
   const rows = state.clientes.map(c=>{
-    const k = nameKey(c.razonSocial);
+    const k = matchKey(c.razonSocial);
     const pts = computePtsCliente(k);           // << cálculo por totales
     const rd  = red[k]||0;
     return { nombre:c.razonSocial, suma:sum[k]||0, pts, red:rd, disp:Math.max(pts-rd,0) };
@@ -704,10 +733,10 @@ async function persistAwards(){
 
 // ===== Redención & histórico
 function puntosDisponibles(nombre){
-  const key = nameKey(nombre);
+  const key = matchKey(nombre);
   const ptsAcum = computePtsCliente(key);
   const red = state.redenciones
-    .filter(r => nameKey(r.cliente) === key)
+    .filter(r => matchKey(r.cliente) === key)
     .reduce((a,b) => a + Number(b.puntos||0), 0);
   return Math.max(ptsAcum - red, 0);
 }
@@ -715,7 +744,7 @@ function renderHist(){ var tb=$('#tbHist'); if(!tb) return; tb.innerHTML=''; (st
 
 function isoMin(x){ try{ return new Date(x).toISOString().slice(0,16); }catch(_){ return String(x||''); } }
 function sameRedeem(a,b){
-  return nameKey(a.cliente)===nameKey(b.cliente) &&
+  return matchKey(a.cliente)===matchKey(b.cliente) &&
          Number(a.puntos)===Number(b.puntos) &&
          String(a.premio||'')===String(b.premio||'') &&
          isoMin(a.fecha)===isoMin(b.fecha);
