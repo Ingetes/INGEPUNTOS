@@ -254,6 +254,10 @@ async function loadSalesFromWorkbookUrl(url){
   const csv = await xlsxArrayBufferToCSV(buf);
   const r = parseSalesText(csv);
   if(!r.ok){ setText('#resSales', r.reason); return; }
+
+  // >>> AÑADE ESTA LÍNEA: reemplazar (no acumular)
+  state.ventas = [];
+
   let ok = 0;
   r.rows.forEach(row => { addVenta(row); ok++; });
   setText('#resSales', 'Ventas cargadas: '+ok+' (auto)');
@@ -268,13 +272,16 @@ async function loadInvoicedFromWorkbookUrl(url){
   const csv = await xlsxArrayBufferToCSV(buf);
   const r = parseInvoicedText(csv);
   if(!r.ok){ setText('#resSales', r.reason); return; }
+
+  // >>> AÑADE ESTA LÍNEA: reemplazar (no acumular)
+  state.facturas = [];
+
   let ok = 0;
   (r.rows||[]).forEach(row => {
     const n = String(row.nombre||'').trim(); if(!n) return;
     state.facturas.push({ cliente:n, importe:Number(row.importe)||0 });
     ok++;
   });
-  // Si ya cargaste ventas, esto actualizará la columna "Compras facturado"
   setText('#resSales', 'Compras facturado cargadas: '+ok+' (auto)');
   renderVentas(); renderPuntos();
 }
