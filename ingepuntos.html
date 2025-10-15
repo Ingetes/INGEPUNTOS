@@ -200,27 +200,37 @@ function $all(s,root){return Array.from((root||document).querySelectorAll(s))}
 function slug(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim()}
 // Normaliza nombres de empresa para emparejar: quita acentos, puntuación,
 // colapsa "S A S" -> "SAS" y remueve sufijos legales comunes.
+// Clave robusta para cruzar clientes entre archivos con nombres distintos
 function nameKey(s){
-  let x = String(s||'')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'') // sin acentos
+  let x = String(s || "")
+    // quita acentos
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    // mayúsculas
     .toUpperCase();
 
-  // colapsa variantes "S A S" -> "SAS"
-  x = x.replace(/\bS\s*A\s*S\b/g, 'SAS');
+  // normaliza variantes separadas por espacios o puntos
+  // "S.A.S" -> "SAS", "S A S" -> "SAS", "S.A" -> "SA"
+  x = x.replace(/\bS[\s\.]*A[\s\.]*S\b/g, "SAS");
+  x = x.replace(/\bS[\s\.]*A\b/g, "SA");
 
-  // quita puntuación → deja letras/números/espacio
-  x = x.replace(/[^\w\s]/g, ' ');
+  // quita toda puntuación (deja letras/números/espacios)
+  x = x.replace(/[^\w\s]/g, " ");
 
-  // elimina sufijos legales comunes (al final o aislados)
+  // elimina sufijos legales y variantes comunes (en cualquier posición)
+  // (los quitamos globalmente porque muchos vienen duplicados o en medio)
   const SUFIJOS = [
-    'SAS','S\\.A\\.S','SA','S\\.A','LTDA','LTD','SEN C','S EN C','SENC','BIC',
-    'CIA','CIA LTDA','COMPA(?:N|Ñ)IA','COMPANIA'
+    // formas cortas
+    "SAS","SA","LTDA","LTD","BIC",
+    // expresiones frecuentes
+    "SOCIEDAD POR ACCIONES SIMPLIFICADA",
+    "COMPA(?:N|Ñ)IA","COMPANIA","CIA","CIA LTDA",
+    "S EN C","SEN C","SENC"
   ];
-  const re = new RegExp(`\\b(?:${SUFIJOS.join('|')})\\b`, 'g');
-  x = x.replace(re, ' ');
+  x = x.replace(new RegExp(`\\b(?:${SUFIJOS.join("|")})\\b`, "g"), " ");
 
-  // espacios
-  x = x.replace(/\s+/g,' ').trim();
+  // colapsa espacios
+  x = x.replace(/\s+/g, " ").trim();
+
   return x;
 }
 function money(n){return Number(n||0).toLocaleString('es-CO')}
