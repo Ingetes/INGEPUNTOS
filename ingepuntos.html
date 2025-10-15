@@ -751,16 +751,19 @@ function sameRedeem(a,b){
 }
 
 function computePtsCliente(key){
-  let sumEq=0, sumSrv=0;
-  state.ventas.forEach(v=>{
-    if (nameKey(v.cliente)!==key) return;
-    const t = String(v.tipo||'EQUIPO').toUpperCase();
-    if (t==='SERVICIO_INGENIERIA') sumSrv += Number(v.importe)||0;
-    else sumEq += Number(v.importe)||0;
+  let sumEq = 0, sumSrv = 0;
+  const tipoSrv = (state.reglas && state.reglas.servicios && state.reglas.servicios.tipo) || 'SERVICIO_INGENIERIA';
+
+  state.ventas.forEach(v => {
+    if (matchKey(v.cliente) !== key) return;      // <-- antes usaba nameKey
+    const t = String(v.tipo || 'EQUIPO').toUpperCase();
+    if (t === tipoSrv) sumSrv += Number(v.importe) || 0;
+    else               sumEq  += Number(v.importe) || 0;
   });
+
   const R = state.reglas;
-  const ptsEq  = Math.floor(sumEq  / R.equipos.umbral)    * R.equipos.puntos;
-  const ptsSrv = Math.floor(sumSrv / R.servicios.umbral)  * R.servicios.puntos;
+  const ptsEq  = Math.floor(sumEq  / R.equipos.umbral)   * R.equipos.puntos;
+  const ptsSrv = Math.floor(sumSrv / R.servicios.umbral) * R.servicios.puntos;
   return ptsEq + ptsSrv;
 }
   
