@@ -262,6 +262,7 @@ function matchKey(s){
   // une: METAL ARANGOS -> METALARANGO, C & G -> (se van las letras sueltas)
   return tokens.join('');
 }
+
 const ALIAS_RULES = [
   // ——— Mapeos solicitados (Compras/Ventas -> nombre canónico) ———
   [/METAL\s*ARANGO(?:S| LIMITADA)?/i, 'METAL ARANGOS'],
@@ -441,41 +442,46 @@ function upsertClientes(rows){
   return ok;
 }
 
-// === Fuzzy Lookup Real (idéntico al comportamiento del complemento Excel) ===
-// --- Normalización de nombres ---
+// 1) Normalización estilo Excel
 function normalizeNameExcelLike(s) {
   if (!s) return '';
   s = String(s).toUpperCase();
-  s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // sin tildes
-  s = s.replace(/&/g, ' Y ');
-  s = s.replace(/[^A-Z0-9\s]/g, ' '); // solo letras/números
+  s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  s = s.replace(/&/g, ' Y ').replace(/[^A-Z0-9\s]/g, ' ');
   s = s.replace(/\s+/g, ' ').trim();
-  const words = s.split(' ').filter(w => !['SAS','LTDA','SA','CIA','COLOMBIA','DE','DEL','LA','EL','Y'].includes(w));
-  return words.join(' ');
+  const stop = ['SAS','LTDA','SA','CIA','COLOMBIA','DE','DEL','LA','EL','Y'];
+  return s.split(' ').filter(w => !stop.includes(w)).join(' ');
 }
 
-// --- Similaridad tipo Excel: mezcla Jaccard + Cosine ---
+// 2) Métricas parecidas a Fuzzy Lookup
 function jaccardExcel(a, b) {
   const A = new Set(normalizeNameExcelLike(a).split(' '));
   const B = new Set(normalizeNameExcelLike(b).split(' '));
   if (!A.size || !B.size) return 0;
-  let inter = 0;
-  for (const w of A) if (B.has(w)) inter++;
+  let inter = 0; for (const w of A) if (B.has(w)) inter++;
   return inter / (A.size + B.size - inter);
 }
 function cosineExcel(a, b) {
   const an = normalizeNameExcelLike(a), bn = normalizeNameExcelLike(b);
   const ag = new Map(), bg = new Map();
-  for (let i = 0; i < an.length - 1; i++) ag.set(an.slice(i, i + 2), (ag.get(an.slice(i, i + 2)) || 0) + 1);
-  for (let i = 0; i < bn.length - 1; i++) bg.set(bn.slice(i, i + 2), (bg.get(bn.slice(i, i + 2)) || 0) + 1);
+  for (let i = 0; i < an.length - 1; i++) ag.set(an.slice(i, i+2), (ag.get(an.slice(i, i+2))||0)+1);
+  for (let i = 0; i < bn.length - 1; i++) bg.set(bn.slice(i, i+2), (bg.get(bn.slice(i, i+2))||0)+1);
   let dot = 0, na = 0, nb = 0;
-  for (const v of ag.values()) na += v * v;
-  for (const v of bg.values()) nb += v * v;
-  for (const [k, v] of ag.entries()) if (bg.has(k)) dot += v * bg.get(k);
+  for (const v of ag.values()) na += v*v; for (const v of bg.values()) nb += v*v;
+  for (const [k,v] of ag.entries()) if (bg.has(k)) dot += v*bg.get(k);
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
-function fuzzyExcelScore(a, b) {
-  return 0.6 * jaccardExcel(a, b) + 0.4 * cosineExcel(a, b);
+function fuzzyExcelScore(a, b) { return 0.6 * jaccardExcel(a,b) + 0.4 * cosineExcel(a,b); }
+
+// 3) Encuentra el mejor match si supera el umbral (≈Fuzzy)
+function findFuzzyExcelMatch(baseList, query, threshold = 0.85) {
+  if (!query) return null;
+  let best = null, bestScore = 0;
+  for (const b of baseList) {
+    const s = fuzzyExcelScore(b.nombre, query);
+    if (s > bestScore) { bestScore = s; best = b; }
+  }
+  return bestScore >= threshold ? best : null;
 }
 
 // --- Emparejamiento con umbral ---
@@ -490,49 +496,41 @@ function findFuzzyExcelMatch(baseList, query, threshold = 0.85) {
 }
 
 // === Integración con tus tablas ===
-// Reescribimos las funciones para usar la base real de clientes
 async function loadAllWithFuzzy() {
-  // 1. Cargar clientes base
-  const clientsRes = await fetch('./Base%20de%20datos%20clientes.xlsx', { cache: 'no-store' });
-  const bufC = await clientsRes.arrayBuffer();
-  const csvC = await xlsxArrayBufferToCSV(bufC);
-  const rClients = parseClientsText(csvC);
-  const baseClientes = rClients.rows.map(r => ({ nombre: r.nombre }));
+  // 1) CLIENTES (base) -> estos son los 822 exactos
+  const bufC = await (await fetch('./Base%20de%20datos%20clientes.xlsx', { cache:'no-store' })).arrayBuffer();
+  const csvC  = XLSX.utils.sheet_to_csv(XLSX.read(bufC, {type:'array'}).Sheets[XLSX.read(bufC,{type:'array'}).SheetNames[0]]);
+  const base  = parseClientsText(csvC).rows.map(r => ({ nombre: r.nombre }));
 
-  // Mostrar los 822 clientes exactos
-  state.clientes = baseClientes.map(r => ({ razonSocial: r.nombre }));
-  renderClientes();
+  // MUESTRA exactamente los 822
+  state.clientes = base.map(r => ({ razonSocial: r.nombre }));
 
-  // 2. Cargar Ventas
-  const salesRes = await fetch('./Ventas.xlsx', { cache: 'no-store' });
-  const bufS = await salesRes.arrayBuffer();
-  const csvS = await xlsxArrayBufferToCSV(bufS);
+  // 2) VENTAS
+  const bufS = await (await fetch('./Ventas.xlsx', { cache:'no-store' })).arrayBuffer();
+  const csvS  = XLSX.utils.sheet_to_csv(XLSX.read(bufS, {type:'array'}).Sheets[XLSX.read(bufS,{type:'array'}).SheetNames[0]]);
   const rSales = parseSalesText(csvS);
 
-  // 3. Cargar Compras Facturado
-  const invRes = await fetch('./Compras_Facturado_Resumen.xlsx', { cache: 'no-store' });
-  const bufI = await invRes.arrayBuffer();
-  const csvI = await xlsxArrayBufferToCSV(bufI);
-  const rInv = parseInvoicedText(csvI);
+  // 3) COMPRAS (VALOR_BRUTO)
+  const bufI = await (await fetch('./Compras_Facturado_Resumen.xlsx', { cache:'no-store' })).arrayBuffer();
+  const csvI  = XLSX.utils.sheet_to_csv(XLSX.read(bufI, {type:'array'}).Sheets[XLSX.read(bufI,{type:'array'}).SheetNames[0]]);
+  const rInv  = parseInvoicedText(csvI);
 
-  // 4. Hacer emparejamiento “fuzzy Excel”
+  // 4) EMPAREJAR con Fuzzy Lookup
   const ventas = [], compras = [];
-
   for (const v of rSales.rows) {
-    const m = findFuzzyExcelMatch(baseClientes, v.nombre);
+    const m = findFuzzyExcelMatch(base, v.nombre);              // ← Fuzzy
     if (m) ventas.push({ cliente: m.nombre, importe: v.importe, tipo: v.tipo });
   }
-
   for (const c of rInv.rows) {
-    const m = findFuzzyExcelMatch(baseClientes, c.nombre);
+    const m = findFuzzyExcelMatch(base, c.nombre);              // ← Fuzzy
     if (m) compras.push({ cliente: m.nombre, importe: c.importe });
   }
 
-  state.ventas = ventas;
+  // reemplaza (no acumula)
+  state.ventas   = ventas;
   state.facturas = compras;
 
-  renderVentas();
-  renderPuntos();
+  renderClientes(); renderVentas(); renderPuntos();
 }
 
 function renderClientes(){ setText('#kpiClientes',state.clientes.length); var q=slug(($('#qClientes')||{value:''}).value); var tb=$('#tbClientes'); if(!tb) return; tb.innerHTML=''; state.clientes.filter(function(c){return !q||slug(c.razonSocial).includes(q)}).sort(function(a,b){return a.razonSocial.localeCompare(b.razonSocial)}).forEach(function(c){var tr=document.createElement('tr'); tr.innerHTML='<td>'+c.razonSocial+'</td>'; tb.appendChild(tr)}); var dl=$('#dlClientes'); if(dl){dl.innerHTML=state.clientes.map(function(c){return '<option value="'+c.razonSocial.replace(/"/g,'&quot;')+'">'}).join('')}}
@@ -744,9 +742,10 @@ document.addEventListener('DOMContentLoaded', function(){
 
     if (res.some(x=>x.ok)){
       const v='?v='+Date.now();
-      loadClientsFromWorkbookUrl(CLIENTS_XLSX_PATH + v).catch(e=>showError(e.message||e));
-      loadSalesFromWorkbookUrl(SALES_XLSX_PATH + v).catch(e=>showError(e.message||e));
-      loadInvoicedFromWorkbookUrl(INVOICED_XLSX_PATH + v).catch(e=>showError(e.message||e));
+      //loadClientsFromWorkbookUrl(CLIENTS_XLSX_PATH + v).catch(e=>showError(e.message||e));
+      //loadSalesFromWorkbookUrl(SALES_XLSX_PATH + v).catch(e=>showError(e.message||e));
+      //loadInvoicedFromWorkbookUrl(INVOICED_XLSX_PATH + v).catch(e=>showError(e.message||e));
+      loadAllWithFuzzy().catch(e => showError(e.message || e));
     }
   });
 });
