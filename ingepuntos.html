@@ -441,115 +441,130 @@ function upsertClientes(rows){
   return ok;
 }
 
-// 1) Normalización y clave de emparejamiento (tipo Fuzzy)
-const STOPWORDS = new Set([
-  "SAS","S.A.S","SA","S.A","LTDA","L.T.D.A","EU","E.U.","CIA","CÍA","Y","&",
-  "DE","DEL","LA","EL","LOS","LAS","THE","COLOMBIA","COLOMBIANA"
-]);
-
-const REPLACERS = [
-  [/&/g, " Y "],
-  [/[,.;:()\-_/]/g, " "],
-  [/INGENIERÍA|INGENIERIA/g, "INGENIERIA"],
-  [/AUTOMATIZACIÓN|AUTOMATIZACION/g, "AUTOMATIZACION"],
-  [/CONTROL(ES)?/g, "CONTROL"],
-  [/\s+/g, " "],
+// --- 1) Normalización estilo Fuzzy Lookup (similar a Excel) ---
+const LEGAL_SUFFIXES = [
+  'SAS','S.A.S','SA','S.A.','LTDA','L.T.D.A.','E.U.','CIA','CÍA','CÍA.','CIA.',
+  'S EN C','S. EN C.','S EN C','SC','S.C.','S.R.L.','SRL'
+];
+const GENERIC_WORDS = [
+  'COLOMBIA','COLOMBIANA','INDUSTRIAL','INDUSTRIALES','INGENIERIA','INGENIERÍA',
+  'SERVICIOS','SERVICIO','SOLUCIONES','GROUP','GRUPO','COMERCIAL','COMERCIALIZADORA',
+  'TECNOLOGIA','TECNOLOGÍA','PROYECTOS','AUTOMATIZACION','AUTOMATIZACIÓN','ELECTRICOS',
+  'ELÉCTRICOS','ELECTRICA','ELÉCTRICA','DE','DEL','LA','EL','Y','&'
 ];
 
-function canonName(raw) {
-  if (!raw) return "";
-  let s = String(raw).normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // quita acentos
-  s = s.toUpperCase().trim();
-  for (const [re, rep] of REPLACERS) s = s.replace(re, rep);
-  s = s.trim();
-  return s;
-}
+function normalizeName(raw) {
+  if (!raw) return '';
+  let s = (''+raw).toUpperCase();
 
-function matchKey(raw) {
-  const s = canonName(raw);
-  if (!s) return "";
-  const tokens = s.split(" ")
-    .filter(t => t && !STOPWORDS.has(t))
-    .map(t => t.trim());
-  // quita duplicados y ordena para “token-set” join
-  const uniq = [...new Set(tokens)].sort();
-  return uniq.join(" ");
-}
+  // equivalencias básicas
+  s = s.normalize('NFD').replace(/[\u0300-\u036f]/g,''); // quitar tildes
+  s = s.replace(/&/g,' Y ');
+  s = s.replace(/[^A-Z0-9\s]/g, ' ');                    // quitar puntuación
+  s = s.replace(/\s+/g, ' ').trim();
 
-// 2) Utilidades numéricas (para Importes / VALOR_BRUTO con separadores)
-function parseNumberLikeExcel(v) {
-  if (typeof v === "number") return v;
-  if (!v) return 0;
-  let s = String(v).trim();
-  // quita moneda y espacios
-  s = s.replace(/[^\d,.-]/g, "");
-  // si hay puntos como separador de miles y coma como decimal
-  if (s.indexOf(",") > -1 && s.indexOf(".") > -1 && s.lastIndexOf(",") > s.lastIndexOf(".")) {
-    s = s.replace(/\./g, "").replace(",", ".");
-  } else {
-    s = s.replace(/\./g, "").replace(",", ""); // todo a entero
+  // quitar sufijos legales al final
+  for (const suf of LEGAL_SUFFIXES) {
+    const re = new RegExp(`\\b${suf}\\b\\.?$`);
+    if (re.test(s)) s = s.replace(re,'').trim();
   }
-  const n = Number(s);
-  return isNaN(n) ? 0 : n;
+
+  // quitar palabras genéricas redundantes
+  const tokens = s.split(' ').filter(t => t && !GENERIC_WORDS.includes(t));
+  return tokens.join(' ').replace(/\s+/g,' ').trim();
 }
 
-// 3) Agregadores por clave
-function groupSumByKey(rows, nameField, amountField) {
-  const map = new Map(); // key -> {nombreOriginal:any, suma:number}
-  for (const r of rows) {
-    const nombre = (r[nameField] ?? "").toString();
-    const key = matchKey(nombre);
-    if (!key) continue;
-    const val = parseNumberLikeExcel(r[amountField]);
-    const curr = map.get(key) || { nombre, suma: 0 };
-    curr.suma += val;
-    map.set(key, curr);
+// --- 2) Similitudes: Jaccard de tokens + Cosine de bigramas ---
+function jaccardTokenSet(a, b) {
+  const A = new Set(normalizeName(a).split(' ').filter(Boolean));
+  const B = new Set(normalizeName(b).split(' ').filter(Boolean));
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  const uni = A.size + B.size - inter;
+  return inter / uni;
+}
+
+function cosineBigrams(a, b) {
+  function bigrams(s) {
+    const n = normalizeName(s);
+    const arr = [];
+    for (let i=0;i<n.length-1;i++) arr.push(n.slice(i,i+2));
+    return arr;
   }
-  return map;
+  const A = bigrams(a), B = bigrams(b);
+  if (!A.length || !B.length) return 0;
+  const mapA = new Map(), mapB = new Map();
+  for (const x of A) mapA.set(x, (mapA.get(x)||0)+1);
+  for (const x of B) mapB.set(x, (mapB.get(x)||0)+1);
+  let dot = 0, nA = 0, nB = 0;
+  for (const [,v] of mapA) nA += v*v;
+  for (const [,v] of mapB) nB += v*v;
+  for (const [k,v] of mapA) if (mapB.has(k)) dot += v * mapB.get(k);
+  return dot / (Math.sqrt(nA) * Math.sqrt(nB));
 }
 
-// 4) Cargas existentes + join (ajusta los nombres de columnas si en tus excels difieren)
-async function loadEverythingAndJoin() {
-  // A) CLIENTES (maestro): debe tener la razón social en alguna columna (“Nombre de la cuenta” en tu base)
-  const clientes = await loadClientsFromWorkbookUrl(); // <-- tu función existente
-  const clientesList = clientes.map(c => ({
-    display: c.nombre, // ajusta si tu función devuelve otra forma
-    key: matchKey(c.nombre)
-  })).filter(c => c.key);
+function fuzzyScore(a, b) {
+  // mezcla parecida al add-in de Excel
+  const j = jaccardTokenSet(a,b);
+  const c = cosineBigrams(a,b);
+  return 0.6*j + 0.4*c;
+}
 
-  // B) VENTAS.xlsx  (columnas esperadas: Nombre / Importe)
-  const ventasRows = await loadSalesFromWorkbookUrl(); // <-- tu loader existente
-  const ventasByKey = groupSumByKey(ventasRows, "Nombre de la cuenta", "Importe");
+// --- 3) Overrides manuales (solo si hace falta forzarlos) ---
+const NAME_OVERRIDES = {
+  // 'COMPRAS o VENTAS' : 'Nombre exacto en la base'
+  'GLOBEINDUSTRIES SA': 'GLOBE INDUSTRIES',
+  'C M INGENIEROS':'C&M INGENIEROS',
+  'INSOLTEC LIMITADA':'INSOLTEC LTDA',
+  'IMSO':'INGENIERIA MANTENIMIENTO Y SERVICIOS ORIENTALES IMSO',
+  // agrega aquí tus casos “incorregibles”
+};
 
-  // C) COMPRAS_FACTURADO_RESUMEN.xlsx (columnas esperadas: NOMBRE_TERCERO / VALOR_BRUTO)
-  const comprasRows = await loadInvoicedFromWorkbookUrl(); // <-- tu loader existente
-  const comprasByKey = groupSumByKey(comprasRows, "NOMBRE_TERCERO", "VALOR_BRUTO");
-
-  // D) Construir modelo final por cliente
-  const model = clientesList.map(c => {
-    const v = ventasByKey.get(c.key)?.suma || 0;
-    const cf = comprasByKey.get(c.key)?.suma || 0;
-    return {
-      cliente: c.display,
-      ventasImporte: v,
-      comprasImporte: cf,
-      // si además llevas puntos, aquí aplica tu lógica de conversión:
-      puntosTotales: Math.floor(v / 1_000_000)  // (ejemplo: 1 punto por $1'000.000 en equipos)
-    };
+// --- 4) Índice de la base y matcher a la base (NO altera el conteo de clientes) ---
+function buildBaseIndex(baseClients) {
+  // baseClients: [{name: 'Nombre de la cuenta', ...}]
+  const idx = {
+    raw: baseClients,
+    byNorm: new Map()
+  };
+  baseClients.forEach(c => {
+    const n = normalizeName(c.name);
+    if (!idx.byNorm.has(n)) idx.byNorm.set(n, []);
+    idx.byNorm.get(n).push(c);
   });
+  return idx;
+}
 
-  // E) Render: usa tus renderizadores existentes
-  //    - Clientes: mostrar count 822
-  renderClientesCount(clientesList.length); // implementa si no lo tienes
-  //    - Ventas: tabla con Suma de importes (v)
-  renderVentasPorCliente(model.map(m => ({
-    nombre: m.cliente,
-    registros: 0, // si llevas recuento, cámbialo
-    sumaImportes: m.ventasImporte,
-    comprasFacturado: m.comprasImporte
-  })));
-  //    - Puntos o donde necesites:
-  renderPuntosPorCliente(model);
+function findBestInBase(index, queryName, threshold=0.86) {
+  if (!queryName) return null;
+
+  // 1) override manual
+  const ov = NAME_OVERRIDES[(queryName||'').toUpperCase().replace(/\s+/g,' ').trim()];
+  if (ov) {
+    const target = normalizeName(ov);
+    const list = index.byNorm.get(target);
+    if (list && list.length) return {client: list[0], score: 1};
+  }
+
+  // 2) acceso directo por normalización exacta
+  const norm = normalizeName(queryName);
+  const direct = index.byNorm.get(norm);
+  if (direct && direct.length) return {client: direct[0], score: 1};
+
+  // 3) búsqueda difusa lineal (la base son ~800 y rinde bien)
+  let best = null, bestScore = 0;
+  for (const c of index.raw) {
+    const s = fuzzyScore(queryName, c.name);
+    if (s > bestScore) { bestScore = s; best = c; }
+  }
+  return (bestScore >= threshold) ? {client: best, score: bestScore} : null;
+}
+
+// --- 5) API cómoda para usar en tus agregados ---
+function matchToBase(index, name) {
+  const r = findBestInBase(index, name);
+  return r ? r.client.name : null; // devuelve el nombre EXACTO de la base
 }
 
 function renderClientes(){ setText('#kpiClientes',state.clientes.length); var q=slug(($('#qClientes')||{value:''}).value); var tb=$('#tbClientes'); if(!tb) return; tb.innerHTML=''; state.clientes.filter(function(c){return !q||slug(c.razonSocial).includes(q)}).sort(function(a,b){return a.razonSocial.localeCompare(b.razonSocial)}).forEach(function(c){var tr=document.createElement('tr'); tr.innerHTML='<td>'+c.razonSocial+'</td>'; tb.appendChild(tr)}); var dl=$('#dlClientes'); if(dl){dl.innerHTML=state.clientes.map(function(c){return '<option value="'+c.razonSocial.replace(/"/g,'&quot;')+'">'}).join('')}}
