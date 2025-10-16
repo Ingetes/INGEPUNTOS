@@ -440,6 +440,118 @@ function upsertClientes(rows){
   });
   return ok;
 }
+
+// 1) Normalización y clave de emparejamiento (tipo Fuzzy)
+const STOPWORDS = new Set([
+  "SAS","S.A.S","SA","S.A","LTDA","L.T.D.A","EU","E.U.","CIA","CÍA","Y","&",
+  "DE","DEL","LA","EL","LOS","LAS","THE","COLOMBIA","COLOMBIANA"
+]);
+
+const REPLACERS = [
+  [/&/g, " Y "],
+  [/[,.;:()\-_/]/g, " "],
+  [/INGENIERÍA|INGENIERIA/g, "INGENIERIA"],
+  [/AUTOMATIZACIÓN|AUTOMATIZACION/g, "AUTOMATIZACION"],
+  [/CONTROL(ES)?/g, "CONTROL"],
+  [/\s+/g, " "],
+];
+
+function canonName(raw) {
+  if (!raw) return "";
+  let s = String(raw).normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // quita acentos
+  s = s.toUpperCase().trim();
+  for (const [re, rep] of REPLACERS) s = s.replace(re, rep);
+  s = s.trim();
+  return s;
+}
+
+function matchKey(raw) {
+  const s = canonName(raw);
+  if (!s) return "";
+  const tokens = s.split(" ")
+    .filter(t => t && !STOPWORDS.has(t))
+    .map(t => t.trim());
+  // quita duplicados y ordena para “token-set” join
+  const uniq = [...new Set(tokens)].sort();
+  return uniq.join(" ");
+}
+
+// 2) Utilidades numéricas (para Importes / VALOR_BRUTO con separadores)
+function parseNumberLikeExcel(v) {
+  if (typeof v === "number") return v;
+  if (!v) return 0;
+  let s = String(v).trim();
+  // quita moneda y espacios
+  s = s.replace(/[^\d,.-]/g, "");
+  // si hay puntos como separador de miles y coma como decimal
+  if (s.indexOf(",") > -1 && s.indexOf(".") > -1 && s.lastIndexOf(",") > s.lastIndexOf(".")) {
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else {
+    s = s.replace(/\./g, "").replace(",", ""); // todo a entero
+  }
+  const n = Number(s);
+  return isNaN(n) ? 0 : n;
+}
+
+// 3) Agregadores por clave
+function groupSumByKey(rows, nameField, amountField) {
+  const map = new Map(); // key -> {nombreOriginal:any, suma:number}
+  for (const r of rows) {
+    const nombre = (r[nameField] ?? "").toString();
+    const key = matchKey(nombre);
+    if (!key) continue;
+    const val = parseNumberLikeExcel(r[amountField]);
+    const curr = map.get(key) || { nombre, suma: 0 };
+    curr.suma += val;
+    map.set(key, curr);
+  }
+  return map;
+}
+
+// 4) Cargas existentes + join (ajusta los nombres de columnas si en tus excels difieren)
+async function loadEverythingAndJoin() {
+  // A) CLIENTES (maestro): debe tener la razón social en alguna columna (“Nombre de la cuenta” en tu base)
+  const clientes = await loadClientsFromWorkbookUrl(); // <-- tu función existente
+  const clientesList = clientes.map(c => ({
+    display: c.nombre, // ajusta si tu función devuelve otra forma
+    key: matchKey(c.nombre)
+  })).filter(c => c.key);
+
+  // B) VENTAS.xlsx  (columnas esperadas: Nombre / Importe)
+  const ventasRows = await loadSalesFromWorkbookUrl(); // <-- tu loader existente
+  const ventasByKey = groupSumByKey(ventasRows, "Nombre de la cuenta", "Importe");
+
+  // C) COMPRAS_FACTURADO_RESUMEN.xlsx (columnas esperadas: NOMBRE_TERCERO / VALOR_BRUTO)
+  const comprasRows = await loadInvoicedFromWorkbookUrl(); // <-- tu loader existente
+  const comprasByKey = groupSumByKey(comprasRows, "NOMBRE_TERCERO", "VALOR_BRUTO");
+
+  // D) Construir modelo final por cliente
+  const model = clientesList.map(c => {
+    const v = ventasByKey.get(c.key)?.suma || 0;
+    const cf = comprasByKey.get(c.key)?.suma || 0;
+    return {
+      cliente: c.display,
+      ventasImporte: v,
+      comprasImporte: cf,
+      // si además llevas puntos, aquí aplica tu lógica de conversión:
+      puntosTotales: Math.floor(v / 1_000_000)  // (ejemplo: 1 punto por $1'000.000 en equipos)
+    };
+  });
+
+  // E) Render: usa tus renderizadores existentes
+  //    - Clientes: mostrar count 822
+  renderClientesCount(clientesList.length); // implementa si no lo tienes
+  //    - Ventas: tabla con Suma de importes (v)
+  renderVentasPorCliente(model.map(m => ({
+    nombre: m.cliente,
+    registros: 0, // si llevas recuento, cámbialo
+    sumaImportes: m.ventasImporte,
+    comprasFacturado: m.comprasImporte
+  })));
+  //    - Puntos o donde necesites:
+  renderPuntosPorCliente(model);
+}
+
 function renderClientes(){ setText('#kpiClientes',state.clientes.length); var q=slug(($('#qClientes')||{value:''}).value); var tb=$('#tbClientes'); if(!tb) return; tb.innerHTML=''; state.clientes.filter(function(c){return !q||slug(c.razonSocial).includes(q)}).sort(function(a,b){return a.razonSocial.localeCompare(b.razonSocial)}).forEach(function(c){var tr=document.createElement('tr'); tr.innerHTML='<td>'+c.razonSocial+'</td>'; tb.appendChild(tr)}); var dl=$('#dlClientes'); if(dl){dl.innerHTML=state.clientes.map(function(c){return '<option value="'+c.razonSocial.replace(/"/g,'&quot;')+'">'}).join('')}}
 
 // ===== Ventas
