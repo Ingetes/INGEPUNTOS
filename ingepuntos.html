@@ -262,6 +262,29 @@ function matchKey(s){
   // une: METAL ARANGOS -> METALARANGO, C & G -> (se van las letras sueltas)
   return tokens.join('');
 }
+const ALIAS_RULES = [
+  // === Los que mencionaste explícitamente ===
+  [ /MDALS\s*CONTROL\s*AUTOMATIZACION\s*E\s*INGENIERIA/i, 'Mdals Control Automatizacion E Ingenieria S A S' ],
+  [ /PROYECTOS\s*DE\s*ENERGIA\s*ELECTRICA\s*Y\s*CONTROL/i, 'PROYECTOS DE ENERGIA ELECTRICA Y CONTROL' ],
+  [ /METALARANGO/i, 'METAL ARANGOS' ],
+  [ /INSOLTEC/i, 'INSOLTEC LTDA' ],
+  [ /CAMILO.*MORENOS.*INGENIERO/i, 'C&M INGENIEROS' ],
+  [ /(IMSO|MANTENIMIENTO\s*Y\s*SERVICIOS\s*ORIENTALES)/i, 'INGENIERÍA MANTENIMIENTO Y SERVICIOS ORIENTALES IMSO' ],
+  [ /TOOL\s*SUPPLY/i, 'TOOL SUPPLY' ],
+  [ /EDUARDO\s*MARQUEZ.*HIJOS/i, 'EDUARDO MARQUEZ E HIJOS' ],
+  [ /AVANTEC/i, 'AVANTEC LTDA' ],
+  [ /INDUSTRIA\s*COLOMBIANA\s*DE\s*MANTENIMIENTO\s*Y\s*MAQUINARIA.*(INCOLMAT)?/i, 'INDUSTRIA COLOMBIANA DE MANTENIMIENTO Y MAQUINARIA S.A.S' ],
+  // Puedes seguir agregando aquí…
+];
+
+// Devuelve el "nombre canónico" a mostrar y usar como clave
+function canonName(n){
+  const nk = nameKey(n);                // normaliza: mayus, sin tildes, sin S.A.S/LTDA, etc.
+  for (const [re, canon] of ALIAS_RULES){
+    if (re.test(nk)) return canon;
+  }
+  return String(n||'').trim();
+}
 function money(n){return Number(n||0).toLocaleString('es-CO')}
 function setText(sel,txt){var el=$(sel); if(el) el.textContent=txt}
 function showError(msg){setText('#debug','⚠️ '+msg)}
@@ -341,11 +364,12 @@ async function loadInvoicedFromWorkbookUrl(url){
   state.facturas = [];
 
   let ok = 0;
-  (r.rows||[]).forEach(row => {
-    const n = String(row.nombre||'').trim(); if(!n) return;
-    state.facturas.push({ cliente:n, importe:Number(row.importe)||0 });
-    ok++;
-  });
+(r.rows||[]).forEach(row => {
+  const n = canonName(row.nombre||'');
+  if(!n) return;
+  state.facturas.push({ cliente:n, importe:Number(row.importe)||0 });
+  ok++;
+});
   setText('#resSales', 'Compras facturado cargadas: '+ok+' (auto)');
   renderVentas(); renderPuntos();
 }
@@ -386,12 +410,14 @@ function parseClientsText(text){
   return {ok:true,rows:out};
 }
 function upsertClientes(rows){
-  var ok = 0;
-  rows.forEach(function(r){
-    var n = String(r.nombre||'').trim();
-    if(!n) return;
-    // quitar la validación de duplicados
-    state.clientes.push({razonSocial:n});
+  let ok = 0;
+  const seen = new Set(state.clientes.map(c => matchKey(c.razonSocial)));
+  rows.forEach(r=>{
+    const n = canonName(r.nombre||'');
+    const k = matchKey(n);
+    if (!n || seen.has(k)) return;
+    state.clientes.push({ razonSocial: n });
+    seen.add(k);
     ok++;
   });
   return ok;
@@ -417,10 +443,16 @@ function parseSalesText(text){
   return {ok:true,rows:out};
 }
 function addVenta(v){
-  var n=String(v.nombre||'').trim(); if(!n) return;
-  var cli=state.clientes.find(function(c){return matchKey(c.razonSocial)===matchKey(n)});
-  if(!cli){cli={razonSocial:n}; state.clientes.push(cli);} 
-  state.ventas.push({cliente:cli.razonSocial, importe:Number(v.importe)||0, tipo:String(v.tipo||'EQUIPO').toUpperCase()})
+  const original = String(v.nombre||'').trim();
+  if(!original) return;
+  const n = canonName(original);
+  let cli = state.clientes.find(c => matchKey(c.razonSocial) === matchKey(n));
+  if(!cli){ cli = {razonSocial:n}; state.clientes.push(cli); }
+  state.ventas.push({
+    cliente: cli.razonSocial,
+    importe: Number(v.importe)||0,
+    tipo: String(v.tipo||'EQUIPO').toUpperCase()
+  });
 }
 function renderVentas(){
   var sum={}, cnt={}, fac={};
