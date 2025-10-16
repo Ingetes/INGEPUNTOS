@@ -385,10 +385,17 @@ function parseClientsText(text){
   var out=body.map(function(r){return {nombre:r[idx]}}).filter(function(r){return String(r.nombre||'').trim()});
   return {ok:true,rows:out};
 }
-function upsertClientes(rows){var ok=0; rows.forEach(function(r){var n=String(r.nombre||'').trim(); 
-                                                                 if(!n) return; 
-                                                                 if(!state.clientes.some(function(c){return matchKey(c.razonSocial)===matchKey(n)})){state.clientes.push({razonSocial:n});} ok++;})
-                                                                  ; return ok}
+function upsertClientes(rows){
+  var ok = 0;
+  rows.forEach(function(r){
+    var n = String(r.nombre||'').trim();
+    if(!n) return;
+    // quitar la validación de duplicados
+    state.clientes.push({razonSocial:n});
+    ok++;
+  });
+  return ok;
+}
 function renderClientes(){ setText('#kpiClientes',state.clientes.length); var q=slug(($('#qClientes')||{value:''}).value); var tb=$('#tbClientes'); if(!tb) return; tb.innerHTML=''; state.clientes.filter(function(c){return !q||slug(c.razonSocial).includes(q)}).sort(function(a,b){return a.razonSocial.localeCompare(b.razonSocial)}).forEach(function(c){var tr=document.createElement('tr'); tr.innerHTML='<td>'+c.razonSocial+'</td>'; tb.appendChild(tr)}); var dl=$('#dlClientes'); if(dl){dl.innerHTML=state.clientes.map(function(c){return '<option value="'+c.razonSocial.replace(/"/g,'&quot;')+'">'}).join('')}}
 
 // ===== Ventas
