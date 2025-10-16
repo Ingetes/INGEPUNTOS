@@ -263,18 +263,36 @@ function matchKey(s){
   return tokens.join('');
 }
 const ALIAS_RULES = [
-  // === Los que mencionaste explícitamente ===
-  [ /MDALS\s*CONTROL\s*AUTOMATIZACION\s*E\s*INGENIERIA/i, 'Mdals Control Automatizacion E Ingenieria S A S' ],
-  [ /PROYECTOS\s*DE\s*ENERGIA\s*ELECTRICA\s*Y\s*CONTROL/i, 'PROYECTOS DE ENERGIA ELECTRICA Y CONTROL' ],
-  [ /METALARANGO/i, 'METAL ARANGOS' ],
-  [ /INSOLTEC/i, 'INSOLTEC LTDA' ],
-  [ /CAMILO.*MORENOS.*INGENIERO/i, 'C&M INGENIEROS' ],
-  [ /(IMSO|MANTENIMIENTO\s*Y\s*SERVICIOS\s*ORIENTALES)/i, 'INGENIERÍA MANTENIMIENTO Y SERVICIOS ORIENTALES IMSO' ],
-  [ /TOOL\s*SUPPLY/i, 'TOOL SUPPLY' ],
-  [ /EDUARDO\s*MARQUEZ.*HIJOS/i, 'EDUARDO MARQUEZ E HIJOS' ],
-  [ /AVANTEC/i, 'AVANTEC LTDA' ],
-  [ /INDUSTRIA\s*COLOMBIANA\s*DE\s*MANTENIMIENTO\s*Y\s*MAQUINARIA.*(INCOLMAT)?/i, 'INDUSTRIA COLOMBIANA DE MANTENIMIENTO Y MAQUINARIA S.A.S' ],
-  // Puedes seguir agregando aquí…
+  // ——— Mapeos solicitados (Compras/Ventas -> nombre canónico) ———
+  [/METAL\s*ARANGO(?:S| LIMITADA)?/i, 'METAL ARANGOS'],
+
+  [/CL\s*INGENIERIA(?:\s*EN\s*AUTOMATIZACION\s*SAS)?/i, 'CL INGENIERIA'],
+
+  [/SYSELEC(?:\s+INGENIERIA)?\s*(?:SAS)?/i, 'SYSELEC'],
+
+  [/CIVITEL(?:\s+INGENIEROS.*|.*P\s*S\.?A\.?S\.?)?/i, 'CIVITEL'],
+
+  [/(?:EL\s+)?MUNDO\s+ELECTRO(?:INDUSTRIAL|ICO)\s*(?:C\s*&\s*G\s*SAS)?/i, 'MUNDO ELECTRICO INDUSTRIAL'],
+
+  [/INDUSTRIA\s+COLOMBIANA\s+DE\s+MANTENIMIENTO\s+Y\s+MAQUINARIA.*(?:INCOLMAT)?/i,
+   'INDUSTRIA COLOMBIANA DE MANTENIMIENTO Y MAQUINARIA S.A.S'],
+
+  [/INSOLTEC.*(INGENIERIA.*SOLUCIONES.*TECNOLOGICAS.*|LTDA)?/i, 'INSOLTEC LTDA'],
+
+  [/TOOL\s+SUPPLY(?:\s+SOLUCIONES\s+INDUSTRIALES\s*SAS)?/i, 'TOOL SUPPLY'],
+
+  [/EDUARDO\s+MARQUEZ\s+E\s+HIJOS(?:\s+MATERIALES\s+ELECTRICOS\s*S\.?A\.?S\.?)?/i,
+   'EDUARDO MARQUEZ E HIJOS MATERIALES ELECTRICOS S.A.S'],
+
+  [/C\W*&\W*M(?:\s+INGENIEROS)?/i, 'C&M INGENIEROS'],
+
+  [/(IMSO|INGENIERIA.*MANTENIMIENTO.*SERVICIOS.*ORIENTALES)/i,
+   'INGENIERÍA MANTENIMIENTO Y SERVICIOS ORIENTALES IMSO'],
+
+  // ——— Deja también los que ya tenías (si alguno se repite, pon este antes) ———
+  [/MDALS\s*CONTROL\s*AUTOMATIZACION\s*E\s*INGENIERIA/i, 'Mdals Control Automatizacion E Ingenieria S A S'],
+  [/PROYECTOS\s*DE\s*ENERGIA\s*ELECTRICA\s*Y\s*CONTROL/i, 'PROYECTOS DE ENERGIA ELECTRICA Y CONTROL'],
+  // ... (resto de los tuyos)
 ];
 
 // Devuelve el "nombre canónico" a mostrar y usar como clave
